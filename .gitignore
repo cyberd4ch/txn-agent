@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+examples/*_audit.jsonl
+*_audit.jsonl
+.venv/

@@ -1,0 +1,50 @@
+[project]
+name = "txn-agent"
+version = "0.2.0"
+description = "Safety-first transaction layer for purchasing agents: deterministic policy gate, human approvals, idempotent checkout"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+keywords = ["agents", "llm", "commerce", "procurement", "payments", "safety", "audit"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "mypy"]
+llm = ["anthropic"]
+
+[project.urls]
+Homepage = "https://github.com/txn-agent/txn-agent"
+Documentation = "https://github.com/txn-agent/txn-agent/tree/main/docs"
+Changelog = "https://github.com/txn-agent/txn-agent/blob/main/CHANGELOG.md"
+
+[project.scripts]
+txn-agent = "txn_agent.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+# UP007: keep X | None strings as-is for 3.10; B008 etc not needed yet
+ignore = ["UP007"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+files = ["txn_agent"]
