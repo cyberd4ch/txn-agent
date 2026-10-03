@@ -1,6 +1,6 @@
 [project]
 name = "txn-agent"
-version = "0.2.0"
+version = "0.3.0"
 description = "Safety-first transaction layer for purchasing agents: deterministic policy gate, human approvals, idempotent checkout"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -21,8 +21,9 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "mypy"]
+dev = ["pytest", "ruff", "mypy", "httpx"]
 llm = ["anthropic"]
+service = ["fastapi>=0.110", "uvicorn"]
 
 [project.urls]
 Homepage = "https://github.com/txn-agent/txn-agent"
@@ -44,7 +45,16 @@ select = ["E", "F", "W", "I", "B", "UP"]
 # UP007: keep X | None strings as-is for 3.10; B008 etc not needed yet
 ignore = ["UP007"]
 
+[tool.ruff.lint.per-file-ignores]
+# B008: Depends() in argument defaults is the canonical FastAPI idiom
+"txn_agent/service.py" = ["B008"]
+
 [tool.mypy]
 python_version = "3.10"
 strict = true
 files = ["txn_agent"]
+
+[[tool.mypy.overrides]]
+module = ["fastapi.*", "pydantic.*"]
+# typed upstream; keep strict local analysis
+follow_imports = "normal"

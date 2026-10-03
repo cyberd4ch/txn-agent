@@ -53,14 +53,23 @@ and a policy you own:
   awareness, and a price-drift check against the quoted total.
 - **Pluggable approvals** — `WebhookApprover` (HMAC-signed POST, expects
   `{"approved": true|false}`, fails closed) or bring your own `Approver`.
-- **LLM tool surface** — `TOOL_SCHEMAS` + `ToolRouter` for a Claude tool-use loop:
-  `search_offers`, `build_cart`, `purchase_offer`, `checkout_cart`.
-- **Stdlib-only core** — no runtime dependencies; mocks for all three verticals.
+- **Wired Claude loop** — `txn_agent.llm.run_llm_request` runs a real tool-use loop
+  (`search_offers`, `build_cart`, `purchase_offer`, `checkout_cart`) with `ToolRouter`
+  as the executor: the model proposes, the gate disposes, every tool call is audited.
+- **Real merchant connectors** — `HttpConnector` speaks a small documented REST
+  contract ([docs/connector-contract.md](docs/connector-contract.md)) so any parts
+  distributor/aggregator can adopt it; tested against live HTTP.
+- **REST service** — `txn_agent.service` ships a FastAPI app with per-tenant API keys,
+  budget ceilings, background purchase runs, and an HTTP approval flow (over-cap
+  purchases park on `POST /v1/approvals/{id}`; timeout = denied).
+- **Stdlib-only core** — no runtime dependencies in the core; LLM/service extras are
+  optional (`pip install ".[llm]"` / `".[service]"`).
 
 ## Install
 
 ```bash
-pip install -e ".[dev]"     # with test tools
+pip install -e ".[dev]"        # with test tools
+pip install -e ".[llm,service]" # Claude loop + REST service
 pytest
 ```
 
@@ -76,6 +85,15 @@ python -m txn_agent --cart "drain pump" 1 --cart "door gasket" 2
 
 # route approvals to a webhook instead of the terminal
 python -m txn_agent --cart "drain pump" 1 --approval-webhook https://your.app/approve
+
+# full Claude tool-use loop (needs ANTHROPIC_API_KEY)
+export ANTHROPIC_API_KEY=sk-ant-...
+python -m txn_agent --llm "restock 2 door gaskets and a drain pump, keep it under $200"
+
+# REST service with per-tenant keys and HTTP approvals
+uvicorn txn_agent.service:app --port 8080
+curl -X POST localhost:8080/v1/search -H "X-API-Key: demo-key" \
+     -H 'Content-Type: application/json' -d '{"vertical":"parts","query":"wheel kit","max_total":50}'
 ```
 
 A complete B2B walkthrough (shop policy, weekly restock cart, owner approval, audit
@@ -100,17 +118,20 @@ See [docs/architecture.md](docs/architecture.md) for the module map and
 - `agent.py` — orchestrator: `search`, `purchase`, `checkout_cart`, `run`
 - `policy.py` — deterministic gate: `AUTO_BUY / CONFIRM / B2B_REVIEW / REJECT`
 - `approval.py` — approval channels: webhook (HMAC-signed, fail-closed), auto (demo only)
-- `connectors/` — `Connector` protocol (search, revalidate, checkout) + mock merchants
+- `llm.py` — Claude tool-use loop: model proposes, `ToolRouter` executes, gate disposes
+- `service.py` — FastAPI app: per-tenant keys, async purchase runs, HTTP approvals
+- `connectors/` — `Connector` protocol; `mock.py` (in-memory merchants) + `http.py`
+  (real APIs via [docs/connector-contract.md](docs/connector-contract.md))
 - `tools.py` — Claude tool schemas + router (the model can request, never force, a buy)
 - `intent.py` — naive request parser (swap for LLM extraction; keep budget user-controlled)
 - `payments.py` — token-only vault protocol; `audit.py` — JSONL decision log
 
 ## Roadmap
 
-- Real connectors (distributor APIs with quote/stock endpoints are a natural fit for `Connector`).
-- Wire `TOOL_SCHEMAS` into a Claude tool-use loop with `ToolRouter.call` as the executor.
-- Grocery baskets with perishable constraints; multi-merchant order splitting.
+- First live distributor on `HttpConnector` (the contract doc is the integration path).
 - Real payment tokenization (PSP delegated payments) and a signed approval UI.
+- Grocery baskets with perishable constraints; multi-merchant order splitting.
+- Durable backing store for tenant state behind `TenantRegistry`; OpenAPI-first ops UI.
 
 ## License
 

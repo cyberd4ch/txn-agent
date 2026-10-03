@@ -3,7 +3,28 @@
 All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: SemVer.
 
-## [Unreleased]
+## [0.3.0] - 2026-10-03
+
+### Added
+- **Claude tool-use loop** (`txn_agent/llm.py`): `run_llm_request` wires `TOOL_SCHEMAS`
+  into a real model run with `ToolRouter` as executor — host budget ceilings enforced,
+  every tool call audited, turn budget guard, injectable client for tests.
+  CLI: `python -m txn_agent --llm "..."`.
+- **HTTP merchant connector** (`txn_agent/connectors/http.py`): `HttpConnector`
+  implements the `Connector` protocol over the documented merchant REST contract
+  (`docs/connector-contract.md`) — bearer auth, fail-closed revalidation (unknown
+  offer / network error = out of stock), idempotent checkout, decimal-string money.
+  Tested against a live in-process HTTP server.
+- **REST service** (`txn_agent/service.py`): FastAPI app with per-tenant API keys and
+  budget ceilings, async background purchase runs, HTTP approval flow (over-cap
+  purchases park on `POST /v1/approvals/{id}`; timeout or denial = declined, fail
+  closed), tenant-scoped audit endpoint. Extra: `pip install ".[service]"`.
+
+### Changed
+- Package version 0.3.0; `dev` extra now includes `httpx`; new `service` extra
+  (`fastapi`, `uvicorn`).
+
+## [0.2.0] - 2026-10-03
 
 ### Added
 - **Carts**: multi-line, single-merchant purchase orders. `Cart`/`CartItem` models,

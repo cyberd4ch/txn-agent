@@ -33,12 +33,37 @@ def main(argv: list[str] | None = None) -> int:
                    help="repeatable: multi-line cart, e.g. --cart 'drain pump' 1 --cart 'door gasket' 2")
     p.add_argument("--approval-webhook", default=None,
                    help="POST approval requests here; the endpoint replies {\"approved\": true|false}")
+    p.add_argument("--llm", action="store_true",
+                   help="run the request through a Claude tool-use loop (needs ANTHROPIC_API_KEY)")
+    p.add_argument("--model", default=None, help="Claude model id for --llm")
+    p.add_argument("--budget-ceiling", type=float, default=500.0,
+                   help="host-side cap on any budget the model may request (default 500)")
     a = p.parse_args(argv)
+    if a.llm and a.cart:
+        p.error("--llm and --cart are separate modes")
 
     agent = TransactionalAgent(default_connectors(), DemoVault(),
                                audit=AuditLog(a.audit_file),
                                confirm=prompt_confirm,
                                approver=WebhookApprover(a.approval_webhook) if a.approval_webhook else None)
+
+    if a.llm:  # Claude tool-use loop: model proposes, the gate disposes
+        from decimal import Decimal as D
+
+        from .llm import DEFAULT_MODEL, run_llm_request
+        try:
+            result = run_llm_request(agent, a.request, budget_ceiling=D(str(a.budget_ceiling)),
+                                     model=a.model or DEFAULT_MODEL)
+        except RuntimeError as e:
+            print(f"error: {e}")
+            return 2
+        for tc in result.tool_calls:
+            status = tc["result"].get("status", tc["result"].get("error", "ok"))
+            print(f"tool {tc['tool']} -> {status}")
+        print(result.reply or "(no reply)")
+        statuses = [tc["result"].get("status") for tc in result.tool_calls
+                    if isinstance(tc["result"], dict)]
+        return 1 if any(s in ("declined", "rejected", "failed") for s in statuses) else 0
 
     if a.cart:  # multi-line B2B purchase order through the cart pipeline
         items = []
