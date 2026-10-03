@@ -59,9 +59,14 @@ and a policy you own:
 - **Real merchant connectors** — `HttpConnector` speaks a small documented REST
   contract ([docs/connector-contract.md](docs/connector-contract.md)) so any parts
   distributor/aggregator can adopt it; tested against live HTTP.
+- **Real payments** — `StripeVault` charges exact cart totals off-session via Stripe
+  PaymentIntents (test mode friendly, idempotent, voids the charge if the merchant
+  order fails). Stdlib urllib — no SDK dependency.
 - **REST service** — `txn_agent.service` ships a FastAPI app with per-tenant API keys,
-  budget ceilings, background purchase runs, and an HTTP approval flow (over-cap
-  purchases park on `POST /v1/approvals/{id}`; timeout = denied).
+  budget ceilings, background purchase runs, an HTTP approval flow (over-cap
+  purchases park on `POST /v1/approvals/{id}`; timeout = denied), an **ops console**
+  at `/ops` for approving and watching purchases, and optional SQLite-backed durable
+  state (`txn_agent.storage.SQLiteStore`) that survives restarts.
 - **Stdlib-only core** — no runtime dependencies in the core; LLM/service extras are
   optional (`pip install ".[llm]"` / `".[service]"`).
 
@@ -90,11 +95,32 @@ python -m txn_agent --cart "drain pump" 1 --approval-webhook https://your.app/ap
 export ANTHROPIC_API_KEY=sk-ant-...
 python -m txn_agent --llm "restock 2 door gaskets and a drain pump, keep it under $200"
 
-# REST service with per-tenant keys and HTTP approvals
+# REST service with per-tenant keys, HTTP approvals, and an ops console
 uvicorn txn_agent.service:app --port 8080
 curl -X POST localhost:8080/v1/search -H "X-API-Key: demo-key" \
      -H 'Content-Type: application/json' -d '{"vertical":"parts","query":"wheel kit","max_total":50}'
+open http://localhost:8080/ops      # approve purchases, watch the audit tail
+
+# Stripe-charged purchases (test mode)
+export STRIPE_SECRET_KEY=sk_test_...
+python - <<'PY'
+from txn_agent import Cart, StripeVault, TransactionalAgent
+from txn_agent.approval import AutoApprover
+from txn_agent.connectors import default_connectors
+from txn_agent.intent import parse_request
+
+agent = TransactionalAgent(
+    default_connectors(),
+    StripeVault(api_key="sk_test_...", payment_methods={"shop": "pm_card_visa"}),
+    approver=AutoApprover(), user_id="shop")
+offer = agent.search(parse_request("drain pump"))[0]
+out = agent.checkout_cart(Cart(items=(offer.cart_item(1),)))
+print(out.status)   # PaymentIntent confirmed for the exact total; voided if order fails
+PY
 ```
+
+CI runs a live end-to-end smoke (`scripts/service_smoke.py`) against a real uvicorn
+server on every push: search → cart → checkout → purchased → ops console.
 
 A complete B2B walkthrough (shop policy, weekly restock cart, owner approval, audit
 file): [`examples/repair_shop.py`](examples/repair_shop.py) —
@@ -124,7 +150,10 @@ See [docs/architecture.md](docs/architecture.md) for the module map and
   (real APIs via [docs/connector-contract.md](docs/connector-contract.md))
 - `tools.py` — Claude tool schemas + router (the model can request, never force, a buy)
 - `intent.py` — naive request parser (swap for LLM extraction; keep budget user-controlled)
-- `payments.py` — token-only vault protocol; `audit.py` — JSONL decision log
+- `payments.py` — token-only vault protocol; `ChargingVault` (Stripe PaymentIntents)
+  charges exact totals and voids on failure
+- `storage.py` — per-tenant SQLite persistence (intents, offers, carts, runs,
+  approvals, audit) so the service survives restarts; `audit.py` — JSONL decision log
 
 ## Roadmap
 

@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,service]"
       - name: Lint
         run: ruff check .
       - name: Typecheck
@@ -25,3 +25,25 @@ jobs:
         run: mypy txn_agent
       - name: Test
         run: pytest -q
+
+  service-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[service]"
+      - name: Start service
+        run: |
+          uvicorn txn_agent.service:app --port 8080 > /tmp/uvicorn.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8080/healthz && break
+            sleep 1
+          done
+      - name: End-to-end smoke (search -> cart -> checkout -> purchased -> ops)
+        run: python scripts/service_smoke.py
+      - name: Server log on failure
+        if: failure()
+        run: cat /tmp/uvicorn.log

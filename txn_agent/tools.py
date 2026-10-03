@@ -3,10 +3,13 @@ it cannot bypass the gate, raise the budget past the host-set ceiling, or touch 
 from __future__ import annotations
 
 from decimal import Decimal as D
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .agent import TransactionalAgent
 from .models import Cart, CartItem, Intent, Offer, Vertical, to_dict
+
+if TYPE_CHECKING:
+    from .storage import SQLiteStore
 
 TOOL_SCHEMAS = [
     {
@@ -73,12 +76,39 @@ TOOL_SCHEMAS = [
 
 
 class ToolRouter:
-    def __init__(self, agent: TransactionalAgent, budget_ceiling: D):
+    def __init__(self, agent: TransactionalAgent, budget_ceiling: D,
+                 store: SQLiteStore | None = None, tenant: str = "default"):
         self.agent = agent
         self.budget_ceiling = budget_ceiling  # set by the user/host, never by the model
+        self.store = store  # optional durable state (survives restarts)
+        self.tenant = tenant
         self._intents: dict[str, Intent] = {}
         self._offers: dict[tuple[str, str], Offer] = {}
         self._carts: dict[str, Cart] = {}
+
+    def _intent(self, intent_id: str) -> Intent | None:
+        intent = self._intents.get(intent_id)
+        if intent is None and self.store is not None:
+            intent = self.store.load_intent(self.tenant, intent_id)
+            if intent is not None:
+                self._intents[intent_id] = intent
+        return intent
+
+    def _offer(self, intent_id: str, offer_id: str) -> Offer | None:
+        offer = self._offers.get((intent_id, offer_id))
+        if offer is None and self.store is not None:
+            offer = self.store.load_offer(self.tenant, intent_id, offer_id)
+            if offer is not None:
+                self._offers[(intent_id, offer_id)] = offer
+        return offer
+
+    def _cart(self, cart_id: str) -> Cart | None:
+        cart = self._carts.get(cart_id)
+        if cart is None and self.store is not None:
+            cart = self.store.load_cart(self.tenant, cart_id)
+            if cart is not None:
+                self._carts[cart_id] = cart
+        return cart
 
     def _budget(self, requested: Any) -> D:
         return min(D(str(requested)), self.budget_ceiling)
@@ -92,6 +122,9 @@ class ToolRouter:
             offers = self.agent.search(intent)
             for o in offers:
                 self._offers[(intent.intent_id, o.offer_id)] = o
+            if self.store is not None:
+                self.store.save_intent(self.tenant, intent)
+                self.store.save_offers(self.tenant, intent.intent_id, offers)
             return {"intent_id": intent.intent_id,
                     "offers": [to_dict(o) | {"total": str(o.total)} for o in offers]}
 
@@ -110,12 +143,14 @@ class ToolRouter:
             cart = Cart(items=tuple(items),
                         max_total=self._budget(args["max_total"]) if "max_total" in args else None)
             self._carts[cart.cart_id] = cart
+            if self.store is not None:
+                self.store.save_cart(self.tenant, cart)
             return {"cart_id": cart.cart_id, "merchant": merchant, "total": str(cart.total),
                     "lines": [to_dict(i.offer) | {"quantity": i.quantity} for i in items]}
 
         if name == "purchase_offer":
-            pur_intent = self._intents.get(args["intent_id"])
-            pur_quote = self._offers.get((args["intent_id"], args["offer_id"]))
+            pur_intent = self._intent(args["intent_id"])
+            pur_quote = self._offer(args["intent_id"], args["offer_id"])
             if pur_intent is None or pur_quote is None:
                 return {"error": "unknown intent_id/offer_id; search first"}
             out = self.agent.purchase(pur_intent, pur_quote)
@@ -123,7 +158,7 @@ class ToolRouter:
                     "receipt": to_dict(out.receipt) if out.receipt else None}
 
         if name == "checkout_cart":
-            pur_cart = self._carts.get(args["cart_id"])
+            pur_cart = self._cart(args["cart_id"])
             if pur_cart is None:
                 return {"error": "unknown cart_id; build_cart first"}
             out = self.agent.checkout_cart(pur_cart)

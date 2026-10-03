@@ -3,6 +3,29 @@
 All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: SemVer.
 
+## [0.4.0] - 2026-10-03
+
+### Added
+- **Real payments**: `payments.py` gains `ChargingVault` (authorize/void, idempotent)
+  and `StripeVault` — off-session Stripe PaymentIntents for the exact cart total via
+  stdlib urllib (no SDK), voided automatically if the merchant order fails. The agent
+  charges only after the gate passes; declined payments fail the purchase closed.
+- **Durable state**: `storage.py` with `SQLiteStore` (stdlib sqlite3, WAL, tenant-
+  namespaced intents/offers/carts/runs/approvals/audit) and `StoreAuditLog`.
+  `ToolRouter` persists and reloads state, so carts can be checked out after a
+  restart with identical receipts (idempotency across restarts). Runs interrupted by
+  a restart surface as `interrupted` — never silently resumed (fail closed).
+- **Ops console**: `GET /ops` (self-contained HTML/JS) lists pending approvals with
+  Approve/Deny buttons, run statuses, and the audit tail, backed by `GET /v1/ops/state`.
+- **CI service smoke**: `scripts/service_smoke.py` (stdlib only) exercises a live
+  uvicorn server end-to-end (healthz → search → cart → checkout → purchased → ops);
+  GitHub Actions gains a `service-smoke` job.
+
+### Changed
+- Mock connectors accept `pi_...` payment references (Stripe PaymentIntent ids) in
+  addition to `tok_...`.
+- Package version 0.4.0.
+
 ## [0.3.0] - 2026-10-03
 
 ### Added

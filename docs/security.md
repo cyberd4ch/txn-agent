@@ -13,6 +13,7 @@
 | Silent failures | Append-only audit log records every search, gate decision, approval, and order |
 | Unvetted merchants | `approved_merchants` routes unknown merchants to `B2B_REVIEW` instead of buying |
 | Broken approval channel | All approvers fail closed — network errors, malformed replies, or timeouts count as denial |
+| Purchase resumes after a crash | Runs interrupted by a restart surface as `interrupted` and are never silently resumed; reconcile in-flight charges with the PSP (PaymentIntent ids are in the audit trail) |
 
 ## What this library intentionally does NOT do
 
@@ -38,6 +39,11 @@
       mutate `PolicyConfig` or the budget ceiling at runtime.
 - [ ] Set `always_confirm` for any vertical where returns are hard (flights, custom parts).
 - [ ] Review `max_price_drift_pct` — for volatile markets, lower it or tighten the cap.
+- [ ] Stripe: use a restricted key with only `payment_intents` write scope; keep PM ids
+      in secret config. Charge amounts are asserted against the gated cart total.
+- [ ] Ops console: the `/ops` page is an unauthenticated shell; all data flows through
+      `X-API-Key`-authenticated endpoints. For production, give operators role-scoped
+      credentials separate from tenant API keys and serve `/ops` behind SSO.
 
 ## Reporting
 

@@ -109,3 +109,45 @@ class Receipt:
 def to_dict(obj: Any) -> dict[str, Any]:
     """JSON-safe dict (Decimal/datetime/Enum -> str) for tool results and audit logs."""
     return cast(dict[str, Any], json.loads(json.dumps(asdict(obj), default=str)))
+
+
+def offer_from_dict(d: dict[str, Any]) -> Offer:
+    """Inverse of to_dict for offers (persists across service restarts)."""
+    rp = d.get("return_policy") or {}
+    return Offer(
+        offer_id=str(d["offer_id"]),
+        vertical=Vertical(str(d["vertical"])),
+        merchant=str(d.get("merchant", "")),
+        title=str(d.get("title", "")),
+        unit_price=Decimal(str(d["unit_price"])),
+        in_stock=bool(d.get("in_stock", False)),
+        return_policy=ReturnPolicy(
+            returnable=bool(rp.get("returnable", False)),
+            window_days=int(rp.get("window_days", 0)),
+            refund_type=str(rp.get("refund_type", "none")),
+            restocking_fee_pct=Decimal(str(rp.get("restocking_fee_pct", "0"))),
+        ),
+        quantity=int(d.get("quantity", 1)),
+        shipping=Decimal(str(d.get("shipping", "0"))),
+        currency=str(d.get("currency", "USD")),
+        expires_at=datetime.fromisoformat(str(d["expires_at"])) if d.get("expires_at") else None,
+        lead_time_days=int(d.get("lead_time_days", 0)),
+    )
+
+
+def intent_from_dict(d: dict[str, Any]) -> Intent:
+    return Intent(
+        vertical=Vertical(str(d["vertical"])),
+        query=str(d["query"]),
+        max_total=Decimal(str(d["max_total"])),
+        quantity=int(d.get("quantity", 1)),
+        intent_id=str(d["intent_id"]),
+    )
+
+
+def cart_from_dict(d: dict[str, Any]) -> Cart:
+    """Rebuild a cart from its persisted payload (see SQLiteStore.save_cart)."""
+    items = tuple(CartItem(offer=offer_from_dict(line["offer"]),
+                           quantity=int(line["quantity"])) for line in d["lines"])
+    max_total = Decimal(str(d["max_total"])) if d.get("max_total") is not None else None
+    return Cart(items=items, max_total=max_total, cart_id=str(d["cart_id"]))

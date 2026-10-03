@@ -45,8 +45,8 @@ class MockConnector:
                  lines: list[tuple[str, int]] | None = None) -> Receipt:
         if idempotency_key in self.orders:  # safe retry: same key -> same order
             return self.orders[idempotency_key]
-        if not payment_token.startswith("tok_"):
-            raise CheckoutError("tokenized payment required")
+        if not (payment_token.startswith("tok_") or payment_token.startswith("pi_")):
+            raise CheckoutError("tokenized payment required")  # tok_/pi_ from PSPs
         if lines:  # multi-line cart: every line must be in stock
             for oid, _qty in lines:
                 if oid not in self._catalog or not self._catalog[oid].in_stock:

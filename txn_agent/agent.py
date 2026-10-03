@@ -10,7 +10,7 @@ from .approval import Approver
 from .audit import AuditLog
 from .connectors.base import CheckoutError, Connector
 from .models import Cart, CartItem, Intent, Offer, Receipt, Vertical, to_dict
-from .payments import PaymentVault
+from .payments import PaymentError, PaymentVault
 from .policy import Decision, GateResult, PolicyConfig, evaluate, evaluate_cart
 
 ConfirmFn = Callable[[Offer, GateResult], bool]
@@ -73,6 +73,29 @@ class TransactionalAgent:
         first = cart.items[0].offer
         return bool(self.confirm(first, GateResult(gate.decision, gate.reasons)))
 
+    def _pay(self, cart: Cart, key: str, context_id: str) -> tuple[str, bool]:
+        """Authorize the exact total if the vault supports it. Returns (payment_ref, charged).
+        ChargingVaults move money here — after the gate, before the merchant order."""
+        authorize = getattr(self.vault, "authorize", None)
+        if authorize is None:
+            return self.vault.token_for(self.user_id), False
+        currency = cart.items[0].offer.currency
+        try:
+            return str(authorize(self.user_id, cart.total, currency, key)), True
+        except PaymentError as e:
+            self.audit.record(context_id, "payment_failed", error=str(e))
+            raise
+
+    def _void(self, payment_ref: str, context_id: str) -> None:
+        """Best-effort cancel of an authorization after a failed merchant order."""
+        void = getattr(self.vault, "void", None)
+        if void is None:
+            return
+        try:
+            void(payment_ref)
+        except Exception as e:  # noqa: BLE001 - never mask the original checkout error
+            self.audit.record(context_id, "void_failed", payment_ref=payment_ref, error=str(e))
+
     def checkout_cart(self, cart: Cart, quoted_total: D | None = None) -> Outcome:
         """Revalidate every line -> gate the whole cart -> (approve) -> one idempotent checkout."""
         conn = self.connectors[cart.vertical]
@@ -97,8 +120,14 @@ class TransactionalAgent:
         first = live.items[0].offer
         lines = [(i.offer.offer_id, i.quantity) for i in live.items]
         try:
-            receipt = conn.checkout(first, self.vault.token_for(self.user_id), key, lines=lines)
+            payment_ref, charged = self._pay(live, key, live.cart_id)
+        except PaymentError as e:
+            return Outcome(Status.FAILED, live.cart_id, cart=live, reasons=(f"payment: {e}",))
+        try:
+            receipt = conn.checkout(first, payment_ref, key, lines=lines)
         except CheckoutError as e:
+            if charged:
+                self._void(payment_ref, live.cart_id)
             self.audit.record(live.cart_id, "checkout_failed", error=str(e))
             return Outcome(Status.FAILED, live.cart_id, cart=live, reasons=(str(e),))
         self.audit.record(live.cart_id, "purchased", receipt=to_dict(receipt))
@@ -138,8 +167,14 @@ class TransactionalAgent:
 
         key = idempotency_key(intent, live)
         try:
-            receipt = conn.checkout(live, self.vault.token_for(self.user_id), key)
+            payment_ref, charged = self._pay(single_line_cart(live, intent.intent_id), key, intent.intent_id)
+        except PaymentError as e:
+            return Outcome(Status.FAILED, intent.intent_id, live, reasons=(f"payment: {e}",))
+        try:
+            receipt = conn.checkout(live, payment_ref, key)
         except CheckoutError as e:
+            if charged:
+                self._void(payment_ref, intent.intent_id)
             self.audit.record(intent.intent_id, "checkout_failed", error=str(e))
             return Outcome(Status.FAILED, intent.intent_id, live, reasons=(str(e),))
         self.audit.record(intent.intent_id, "purchased", receipt=to_dict(receipt))
