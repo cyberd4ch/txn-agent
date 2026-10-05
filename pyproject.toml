@@ -35,9 +35,9 @@ llm = ["anthropic"]
 service = ["fastapi>=0.110", "uvicorn"]
 
 [project.urls]
-Homepage = "https://github.com/txn-agent/txn-agent"
-Documentation = "https://github.com/txn-agent/txn-agent/tree/main/docs"
-Changelog = "https://github.com/txn-agent/txn-agent/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/cyberd4ch/txn-agent"
+Documentation = "https://github.com/cyberd4ch/txn-agent/tree/main/docs"
+Changelog = "https://github.com/cyberd4ch/txn-agent/blob/main/CHANGELOG.md"
 
 [project.scripts]
 txn-agent = "txn_agent.cli:main"

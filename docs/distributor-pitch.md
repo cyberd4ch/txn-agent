@@ -59,5 +59,5 @@ distributors that speak the contract — early adopters get that demand first.
 
 ---
 
-*txn-agent is MIT-licensed at [github.com/txn-agent/txn-agent](https://github.com/txn-agent/txn-agent).
+*txn-agent is MIT-licensed at [github.com/cyberd4ch/txn-agent](https://github.com/cyberd4ch/txn-agent).
 Start from [connector-contract.md](connector-contract.md) — three endpoints is the whole ask.*

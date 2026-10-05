@@ -1,7 +1,7 @@
 # txn-agent
 
-[![CI](https://github.com/txn-agent/txn-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/txn-agent/txn-agent/actions/workflows/ci.yml)
-[![Coverage](https://codecov.io/gh/txn-agent/txn-agent/branch/main/graph/badge.svg)](https://codecov.io/gh/txn-agent/txn-agent)
+[![CI](https://github.com/cyberd4ch/txn-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/cyberd4ch/txn-agent/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/cyberd4ch/txn-agent/branch/main/graph/badge.svg)](https://codecov.io/gh/cyberd4ch/txn-agent)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 

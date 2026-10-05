@@ -1,0 +1,48 @@
+name: Publish to PyPI
+
+# Builds the sdist/wheel on every v* tag and uploads via PyPI trusted publishing
+# (OIDC) — no API token is stored in the repo.
+#
+# ONE-TIME SETUP (before the first tag push, or to fix a failed run):
+#   pypi.org -> Account settings -> Publishing -> "Add a new pending publisher":
+#     PyPI project name: txn-agent
+#     Owner: cyberd4ch   Repository: txn-agent
+#     Workflow: publish.yml   Environment: pypi
+# If the upload step fails because the pending publisher isn't configured yet,
+# fix it on PyPI and "Re-run jobs" — the tag itself doesn't need to change.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist and wheel
+        run: |
+          pip install build
+          python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # OIDC trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

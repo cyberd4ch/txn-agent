@@ -130,3 +130,21 @@ python scripts/service_smoke.py   # TXN_SMOKE_URL / TXN_SMOKE_KEY override
 
 It walks healthz → search → cart → checkout → purchased → ops console and exits
 non-zero on any failure (CI runs it on every push).
+
+## 8. Publishing a release to PyPI
+
+`.github/workflows/publish.yml` builds the sdist/wheel on every `v*` tag and uploads
+via PyPI trusted publishing (OIDC) — no API token is stored in the repo.
+
+One-time setup:
+
+1. pypi.org → Account settings → **Publishing** → "Add a new pending publisher":
+   PyPI project name `txn-agent`, Owner `cyberd4ch`, Repository `txn-agent`, Workflow
+   `publish.yml`, Environment `pypi`. (The name was unclaimed as of 2026-10-05.)
+2. Bump `version` in `pyproject.toml`, commit, tag `vX.Y.Z`, and `git push origin vX.Y.Z`.
+3. The first run fails at the upload step if the pending publisher wasn't configured
+   yet — fix step 1 and hit **Re-run jobs**; the tag doesn't need to change.
+4. Verify in a fresh venv: `pip install txn-agent` and `txn-agent --help`.
+
+The tag must match the version in `pyproject.toml` — the wheel filename and PyPI
+version come from pyproject, not the tag.
