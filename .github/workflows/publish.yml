@@ -33,6 +33,32 @@ jobs:
           name: dist
           path: dist/
 
+  release-assets:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # create the GitHub release and upload artifacts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Checksums
+        run: cd dist && shasum -a 256 * > SHA256SUMS.txt
+      - name: Attach assets to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          NOTES=".github/releases/${TAG}.md"
+          ARGS=(--repo "$GITHUB_REPOSITORY" --title "$TAG")
+          if [ -f "$NOTES" ]; then
+            ARGS+=(--notes-file "$NOTES")
+          fi
+          gh release create "$TAG" "${ARGS[@]}" 2>/dev/null || true  # exists on re-runs
+          gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+
   publish:
     needs: build
     runs-on: ubuntu-latest

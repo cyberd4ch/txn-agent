@@ -3,6 +3,22 @@
 All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: SemVer.
 
+## [0.4.2] - 2026-10-05
+
+### Added
+- **Release automation**: the publish workflow builds the sdist/wheel, generates
+  `SHA256SUMS.txt`, creates the GitHub release (notes from
+  `.github/releases/<tag>.md` when present), and attaches all artifacts — a tag
+  push is a complete release.
+
+### Changed
+- Coverage badge is CI-generated on the `badges` branch and rendered via
+  shields.io, replacing the Codecov badge (uploads failing on a runner-side TLS
+  handshake; the upload itself remains best-effort).
+- Repo URLs finalized at `cyberd4ch/txn-agent`; topics and homepage configured;
+  launch-post drafts added under `docs/`.
+- Package version 0.4.2. No library-code changes since 0.4.1.
+
 ## [0.4.1] - 2026-10-05
 
 ### Added
