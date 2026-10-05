@@ -8,6 +8,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # update the coverage badge on the badges branch (main only)
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
@@ -25,6 +27,18 @@ jobs:
         run: mypy txn_agent
       - name: Test
         run: pytest -q --cov=txn_agent --cov-report=xml --cov-report=term --cov-fail-under=85
+      - name: Update coverage badge (badges branch)
+        if: matrix.python-version == '3.12' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PCT=$(python -c "import xml.etree.ElementTree as ET; print(round(float(ET.parse('coverage.xml').getroot().attrib['line-rate'])*100))")
+          COLOR=brightgreen; [ "$PCT" -lt 85 ] && COLOR=orange
+          CONTENT=$(printf '{"schemaVersion":1,"label":"coverage","message":"%s%%","color":"%s"}' "$PCT" "$COLOR" | base64 -w0)
+          SHA=$(gh api "repos/$GITHUB_REPOSITORY/contents/coverage.json?ref=badges" --jq .sha 2>/dev/null || true)
+          ARGS=(-f message "badge: coverage ${PCT}%" -f content "$CONTENT" -f branch badges)
+          [ -n "$SHA" ] && ARGS+=(-f sha "$SHA")
+          gh api -X PUT "repos/$GITHUB_REPOSITORY/contents/coverage.json" "${ARGS[@]}" --jq .commit.sha
       - name: Upload coverage
         if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@v5

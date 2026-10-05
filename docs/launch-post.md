@@ -1,7 +1,7 @@
 # Launch post: txn-agent v0.4.1
 
 *(Draft for a technical launch — HN/Reddit/LinkedIn/blog. Tone: show the invariant,
-show the code, admit what's mock. Swap the demo line for a real one before posting.)*
+show the code, admit what's mock. Terminal transcripts below are real captured output.)*
 
 ---
 
@@ -26,6 +26,35 @@ agent = TransactionalAgent(
 )
 outcome = agent.checkout_cart(cart)   # one gate decision, one approval, one order
 ```
+
+What that looks like in a real terminal. Under the cap, the agent just buys
+(the gate says so, in its own words):
+
+```text
+$ python -m txn_agent "drain pump under $80"
+[parts] 'drain pump' budget $80
+-> purchased
+   within all auto-buy limits
+   order parts-0001 at PartsDirect, $64.74
+   line: parts-6 x1
+```
+
+Over the cap with no human wired in, it refuses — the same pipeline, failing closed
+(note the gate re-checked the live total, $160.73, before asking):
+
+```text
+$ python -m txn_agent --cart "drain pump" 1 --cart "door gasket" 2
+
+Approval needed: PartsDirect - Drain pump assembly x1 = $64.74
+  - total 160.73 above auto-buy cap
+Approve purchase? [y/N]   (no interactive approver available -> denied)
+[cart] PartsDirect: Drain pump assembly x1; Refrigerator door gasket x2 = $160.73
+-> declined
+   total 160.73 above auto-buy cap
+```
+
+No prompt engineering in either run — the second one is the *absence* of an
+approver, and the system treats that as a no.
 
 Every purchase flows through one choke point: revalidate live prices/stock → evaluate
 a deterministic policy gate (`AUTO_BUY / CONFIRM / B2B_REVIEW / REJECT`) → human
