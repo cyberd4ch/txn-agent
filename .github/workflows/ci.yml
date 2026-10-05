@@ -35,9 +35,10 @@ jobs:
           PCT=$(python -c "import xml.etree.ElementTree as ET; print(round(float(ET.parse('coverage.xml').getroot().attrib['line-rate'])*100))")
           COLOR=brightgreen; [ "$PCT" -lt 85 ] && COLOR=orange
           CONTENT=$(printf '{"schemaVersion":1,"label":"coverage","message":"%s%%","color":"%s"}' "$PCT" "$COLOR" | base64 -w0)
-          SHA=$(gh api "repos/$GITHUB_REPOSITORY/contents/coverage.json?ref=badges" --jq .sha 2>/dev/null || true)
-          ARGS=(-f message "badge: coverage ${PCT}%" -f content "$CONTENT" -f branch badges)
-          [ -n "$SHA" ] && ARGS+=(-f sha "$SHA")
+          ARGS=(-f "message=badge: coverage ${PCT}%" -f "content=${CONTENT}" -f "branch=badges")
+          if SHA=$(gh api "repos/$GITHUB_REPOSITORY/contents/coverage.json?ref=badges" --jq .sha 2>/dev/null); then
+            ARGS+=(-f "sha=${SHA}")
+          fi
           gh api -X PUT "repos/$GITHUB_REPOSITORY/contents/coverage.json" "${ARGS[@]}" --jq .commit.sha
       - name: Upload coverage
         if: matrix.python-version == '3.12'
