@@ -58,9 +58,11 @@ because they live in the executor and the gate, not in the system prompt:
 
 txn-agent (MIT, stdlib-only core): https://github.com/cyberd4ch/txn-agent
 
-Would love to see someone wire a local tool-calling model up to ToolRouter — the
-loop in `txn_agent/llm.py` is ~80 lines and the SDK client is injectable, so an
-OpenAI-compatible shim is small. Issues open if you want to build that adapter.
+And the local-model shim already ships: `--llm-endpoint http://127.0.0.1:11434/v1
+--model qwen2.5:7b-instruct` drives the same loop through Ollama, vLLM, or LM Studio
+(stdlib adapter in `txn_agent/llm_openai.py`, no SDK). Try it with your favorite
+tool-calling model and tell me what breaks — malformed tool arguments are already
+handled fail-soft, because they will be malformed.
 
 ---
 

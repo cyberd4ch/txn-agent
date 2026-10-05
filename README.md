@@ -61,6 +61,8 @@ and a policy you own:
 - **Wired Claude loop** — `txn_agent.llm.run_llm_request` runs a real tool-use loop
   (`search_offers`, `build_cart`, `purchase_offer`, `checkout_cart`) with `ToolRouter`
   as the executor: the model proposes, the gate disposes, every tool call is audited.
+  Any **OpenAI-compatible endpoint works too — local models included** (Ollama, vLLM,
+  LM Studio) via the stdlib adapter in `txn_agent/llm_openai.py`.
 - **Real merchant connectors** — `HttpConnector` speaks a small documented REST
   contract ([docs/connector-contract.md](docs/connector-contract.md)) so any parts
   distributor/aggregator can adopt it; tested against live HTTP. A runnable
@@ -101,6 +103,11 @@ python -m txn_agent --cart "drain pump" 1 --approval-webhook https://your.app/ap
 # full Claude tool-use loop (needs ANTHROPIC_API_KEY)
 export ANTHROPIC_API_KEY=sk-ant-...
 python -m txn_agent --llm "restock 2 door gaskets and a drain pump, keep it under $200"
+
+# the same loop on a LOCAL model (any OpenAI-compatible server)
+ollama serve
+python -m txn_agent --llm "restock 2 door gaskets, keep it under $150" \
+    --llm-endpoint http://127.0.0.1:11434/v1 --model qwen2.5:7b-instruct
 
 # REST service with per-tenant keys, HTTP approvals, and an ops console
 uvicorn txn_agent.service:app --port 8080

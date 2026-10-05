@@ -35,6 +35,11 @@ def main(argv: list[str] | None = None) -> int:
                    help="POST approval requests here; the endpoint replies {\"approved\": true|false}")
     p.add_argument("--llm", action="store_true",
                    help="run the request through a Claude tool-use loop (needs ANTHROPIC_API_KEY)")
+    p.add_argument("--llm-endpoint", default=None,
+                   help="run the loop against an OpenAI-compatible endpoint instead "
+                        "(Ollama: http://127.0.0.1:11434/v1, vLLM, LM Studio); requires --model")
+    p.add_argument("--llm-api-key", default="local",
+                   help="API key for --llm-endpoint (local servers usually ignore it)")
     p.add_argument("--model", default=None, help="Claude model id for --llm")
     p.add_argument("--budget-ceiling", type=float, default=500.0,
                    help="host-side cap on any budget the model may request (default 500)")
@@ -51,9 +56,16 @@ def main(argv: list[str] | None = None) -> int:
         from decimal import Decimal as D
 
         from .llm import DEFAULT_MODEL, run_llm_request
+        client = None
+        if a.llm_endpoint:
+            from .llm_openai import OpenAICompatClient
+
+            if not a.model:
+                p.error("--llm-endpoint needs --model (e.g. qwen2.5:7b-instruct)")
+            client = OpenAICompatClient(a.llm_endpoint, a.llm_api_key)
         try:
             result = run_llm_request(agent, a.request, budget_ceiling=D(str(a.budget_ceiling)),
-                                     model=a.model or DEFAULT_MODEL)
+                                     model=a.model or DEFAULT_MODEL, client=client)
         except RuntimeError as e:
             print(f"error: {e}")
             return 2

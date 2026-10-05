@@ -114,6 +114,14 @@ class ToolRouter:
         return min(D(str(requested)), self.budget_ceiling)
 
     def call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return self._dispatch(name, args)
+        except (KeyError, TypeError, ValueError) as e:
+            # Local/weak models send malformed arguments; fail soft so the loop can
+            # report the problem back to the model instead of crashing the run.
+            return {"error": f"invalid arguments for {name}: {e}"}
+
+    def _dispatch(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         if name == "search_offers":
             intent = Intent(vertical=Vertical(args["vertical"]), query=args["query"],
                             max_total=self._budget(args["max_total"]),
