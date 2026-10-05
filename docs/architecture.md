@@ -70,6 +70,16 @@
   ceiling enforcement. Live-model smoke is a manual step:
   `ANTHROPIC_API_KEY=sk-ant-... python -m txn_agent --llm "restock 2 door gaskets, under $150"`.
   Without the key the CLI fails closed (`error: install the llm extra...`, exit 2).
+- **Local models** (`llm_openai.py`, live smoke 2026-10-05, Ollama 0.20.5,
+  `qwen2.5:3b` via `--llm-endpoint`): under-cap request completed a full
+  search → build_cart → checkout_cart → **purchased** ($64.74, order parts-0001)
+  on the first try. A multi-line restock saw the model hallucinate offer ids,
+  receive the fail-soft error, recover, and assemble the $160.73 cart — then stop
+  and ask for approval rather than force checkout of an over-cap cart. Two real
+  fixes came out of this smoke: currency-formatted budgets ("$200") now parse and
+  cap, and malformed tool arguments fail soft into the loop instead of crashing.
+  Note: models without tool templates (gemma3:1b) are rejected by the server;
+  the deepseek models on disk are coder/reasoner variants without tool support.
 - **Stripe** (`StripeVault`): verified against a conforming fake Stripe server —
   exact-cents charges, idempotent replays, void-on-merchant-failure, retrieve
   verification. A live test-mode charge is a manual step:

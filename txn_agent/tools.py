@@ -111,7 +111,14 @@ class ToolRouter:
         return cart
 
     def _budget(self, requested: Any) -> D:
-        return min(D(str(requested)), self.budget_ceiling)
+        """Clamp the model-requested budget to the host ceiling (never trust the model).
+        Local models send things like "$200"; unparseable forms fail soft via the
+        ValueError raised here (caught by call())."""
+        text = str(requested).replace("$", "").replace(",", "").strip()
+        try:
+            return min(D(text), self.budget_ceiling)
+        except ArithmeticError as e:  # decimal.InvalidOperation is an ArithmeticError
+            raise ValueError(f"unparseable budget {requested!r}") from e
 
     def call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         try:

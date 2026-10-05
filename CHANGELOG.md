@@ -3,6 +3,26 @@
 All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: SemVer.
 
+## [0.4.3] - 2026-10-05
+
+### Added
+- **Local-model loop**: `txn_agent/llm_openai.py` adapts the Anthropic-Messages
+  surface onto the OpenAI chat-completions wire format (stdlib urllib, no SDK), so
+  any OpenAI-compatible server — Ollama, vLLM, LM Studio — runs the same gated
+  purchasing loop. CLI: `--llm-endpoint` + `--model`. Live-verified with
+  `qwen2.5:3b` on Ollama (see `docs/architecture.md` Verification status).
+- **FAQ** ([docs/faq.md](docs/faq.md)): the anticipated launch objections answered
+  from the code; launch-post drafts under `docs/launch/` with a posting runbook.
+
+### Fixed
+- `ToolRouter` no longer crashes the loop on malformed model output: unparseable
+  budgets and bad tool arguments return a readable error to the model instead of
+  raising (local models send "\$200"-style budgets and hallucinated offer ids —
+  both now handled, the live smoke exercised the recovery path).
+
+### Changed
+- Package version 0.4.3.
+
 ## [0.4.2] - 2026-10-05
 
 ### Added

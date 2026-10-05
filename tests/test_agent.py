@@ -73,3 +73,20 @@ def test_router_caps_model_supplied_budget():
                                         "max_total": 10000})
     out = router.call("purchase_offer", {"intent_id": res["intent_id"], "offer_id": "parts-2"})
     assert out["status"] == "rejected" and out["receipt"] is None
+
+
+def test_router_accepts_currency_formatted_budget():
+    """Local models send "$200"-style budgets; parse then cap at the ceiling."""
+    agent, _ = make()
+    router = ToolRouter(agent, budget_ceiling=D("100"))
+    out = router.call("search_offers", {"vertical": "parts", "query": "drain pump",
+                                        "max_total": "$200"})
+    assert "error" not in out and out["offers"]  # parsed and capped to 100
+
+
+def test_router_fails_soft_on_unparseable_budget():
+    agent, _ = make()
+    router = ToolRouter(agent, budget_ceiling=D("100"))
+    out = router.call("search_offers", {"vertical": "parts", "query": "drain pump",
+                                        "max_total": "cheap"})
+    assert "error" in out and "unparseable budget" in out["error"]
