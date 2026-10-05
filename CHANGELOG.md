@@ -3,6 +3,41 @@
 All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: SemVer.
 
+## [0.4.1] - 2026-10-05
+
+### Added
+- **Cross-worker approvals**: approvals and runs persist to the SQLite store, so a
+  decision made by one worker (or the `/ops` console) resolves a run parked on
+  another; `snapshot()` merges in-memory and stored state. Runs record their owning
+  worker (`owner_pid`, with in-place `_migrate()` for existing databases); a restart
+  that kills the owner surfaces the run as `interrupted` — never silently resumed
+  (fail closed).
+- **Multi-tenant env config**: `tenants_from_env()` builds the tenant registry from
+  `TXN_TENANTS` JSON (per-tenant api key, budget ceiling, store path, Stripe payment
+  methods, approval timeout) for multi-worker deploys behind one service.
+- **Deploy guide** ([docs/deploy.md](docs/deploy.md)): uvicorn workers, `TXN_TENANTS`,
+  TLS via Caddy, Stripe test/live setup, backups, a systemd unit, and a post-deploy
+  smoke check.
+- **Merchant reference adapter** (`examples/distributor_service.py`): the merchant
+  side of the connector contract as a runnable FastAPI app (bearer auth, idempotent
+  orders, decimal-string money) so a distributor becomes agent-purchasable in an
+  afternoon; tested end-to-end through `HttpConnector`.
+- **Distributor one-pager** ([docs/distributor-pitch.md](docs/distributor-pitch.md)).
+- **Stripe charge example** (`examples/stripe_charge.py`): first live test-mode charge
+  through the full pipeline — gate → PaymentIntent for the exact total → merchant
+  order → read the intent back and verify amount/status. Refuses non-test keys.
+- `StripeVault.retrieve(payment_ref)` for verification and reconciliation; the fake
+  Stripe test server now serves GETs, which caught voids being sent as GET (see Fixed).
+- **Coverage in CI**: pytest-cov with `--cov-fail-under=85`, Codecov upload, and CI/
+  coverage badges.
+
+### Fixed
+- `StripeVault._request` sent bodyless POSTs (empty form, e.g. intent cancel) as GET —
+  voids never reached the cancel endpoint against a conforming server.
+
+### Changed
+- Package version 0.4.1.
+
 ## [0.4.0] - 2026-10-03
 
 ### Added

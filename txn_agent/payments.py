@@ -70,14 +70,17 @@ class StripeVault:
 
     # ------------------------------------------------------------------ helpers
 
-    def _post(self, path: str, form: dict[str, Any], idempotency_key: str | None = None) -> dict[str, Any]:
-        data = urllib.parse.urlencode(form, doseq=True).encode()
-        headers = {"Authorization": f"Bearer {self.api_key}",
-                   "Content-Type": "application/x-www-form-urlencoded"}
+    def _request(self, path: str, form: dict[str, Any] | None = None,
+                 idempotency_key: str | None = None) -> dict[str, Any]:
+        data = urllib.parse.urlencode(form, doseq=True).encode() if form is not None else None
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        if form is not None:
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
         if idempotency_key:
             headers["Idempotency-Key"] = idempotency_key
         req = urllib.request.Request(f"{self.base_url}{path}", data=data,
-                                     headers=headers, method="POST")
+                                     headers=headers,
+                                     method="POST" if data is not None else "GET")
         try:
             with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
                 return dict(json.loads(resp.read().decode()))
@@ -101,12 +104,16 @@ class StripeVault:
         """Identity-only token (no charge) for connectors that charge merchant-side."""
         return f"tok_stripe_{user_id}"
 
+    def retrieve(self, payment_ref: str) -> dict[str, Any]:
+        """Read a PaymentIntent back (verification, reconciliation, receipts)."""
+        return self._request(f"/v1/payment_intents/{payment_ref}")
+
     def authorize(self, user_id: str, amount: Decimal, currency: str,
                   idempotency_key: str) -> str:
         pm = self.payment_methods.get(user_id)
         if pm is None:
             raise PaymentError(f"no payment method on file for user {user_id!r}")
-        intent = self._post("/v1/payment_intents", {
+        intent = self._request("/v1/payment_intents", {
             "amount": self._cents(amount),
             "currency": currency.lower(),
             "payment_method": pm,
@@ -121,4 +128,4 @@ class StripeVault:
         return str(intent["id"])
 
     def void(self, payment_ref: str) -> None:
-        self._post(f"/v1/payment_intents/{payment_ref}/cancel", {})
+        self._request(f"/v1/payment_intents/{payment_ref}/cancel", {})

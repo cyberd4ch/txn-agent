@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS carts (
     created_at TEXT NOT NULL, PRIMARY KEY (cart_id, tenant));
 CREATE TABLE IF NOT EXISTS runs (
     run_id TEXT NOT NULL, tenant TEXT NOT NULL, status TEXT NOT NULL,
-    outcome TEXT, updated_at TEXT NOT NULL, PRIMARY KEY (run_id, tenant));
+    outcome TEXT, updated_at TEXT NOT NULL, owner_pid INTEGER,
+    PRIMARY KEY (run_id, tenant));
 CREATE TABLE IF NOT EXISTS approvals (
     approval_id TEXT NOT NULL, tenant TEXT NOT NULL, payload TEXT NOT NULL,
     decision TEXT, decided_at TEXT, PRIMARY KEY (approval_id, tenant));
@@ -60,7 +61,14 @@ class SQLiteStore:
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a database was first created."""
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(runs)").fetchall()}
+        if "owner_pid" not in cols:
+            self._conn.execute("ALTER TABLE runs ADD COLUMN owner_pid INTEGER")
 
     def _exec(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         with self._lock:
@@ -121,17 +129,20 @@ class SQLiteStore:
     # ------------------------------------------------------------------ runs
 
     def save_run(self, tenant: str, run_id: str, status: str,
-                 outcome: dict[str, Any] | None = None) -> None:
-        self._exec("INSERT OR REPLACE INTO runs VALUES (?,?,?,?,?)",
+                 outcome: dict[str, Any] | None = None,
+                 owner_pid: int | None = None) -> None:
+        self._exec("INSERT OR REPLACE INTO runs VALUES (?,?,?,?,?,?)",
                    (run_id, tenant, status,
-                    json.dumps(outcome, default=str) if outcome is not None else None, _now()))
+                    json.dumps(outcome, default=str) if outcome is not None else None,
+                    _now(), owner_pid))
 
     def load_run(self, tenant: str, run_id: str) -> dict[str, Any] | None:
-        row = self._query_one("SELECT status, outcome FROM runs "
+        row = self._query_one("SELECT status, outcome, owner_pid FROM runs "
                               "WHERE tenant=? AND run_id=?", (tenant, run_id))
         if row is None:
             return None
-        return {"status": row[0], "outcome": json.loads(row[1]) if row[1] else None}
+        return {"status": row[0], "outcome": json.loads(row[1]) if row[1] else None,
+                "owner_pid": row[2]}
 
     # ------------------------------------------------------------------ approvals
 
@@ -139,10 +150,25 @@ class SQLiteStore:
         self._exec("INSERT OR REPLACE INTO approvals VALUES (?,?,?,?,?)",
                    (approval_id, tenant, json.dumps(payload, default=str), None, None))
 
-    def resolve_approval(self, tenant: str, approval_id: str, approved: bool) -> None:
-        self._exec("UPDATE approvals SET decision=?, decided_at=? "
-                   "WHERE tenant=? AND approval_id=?",
-                   ("approved" if approved else "denied", _now(), tenant, approval_id))
+    def resolve_approval(self, tenant: str, approval_id: str, approved: bool) -> bool:
+        cur = self._exec("UPDATE approvals SET decision=?, decided_at=? "
+                         "WHERE tenant=? AND approval_id=? AND decision IS NULL",
+                         ("approved" if approved else "denied", _now(), tenant, approval_id))
+        return bool(cur.rowcount)
+
+    def pending_approvals(self, tenant: str) -> list[tuple[str, dict[str, Any]]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT approval_id, payload FROM approvals "
+                "WHERE tenant=? AND decision IS NULL", (tenant,)).fetchall()
+        return [(r[0], json.loads(r[1])) for r in rows]
+
+    def load_approval(self, tenant: str, approval_id: str) -> dict[str, Any] | None:
+        row = self._query_one("SELECT payload, decision FROM approvals "
+                              "WHERE tenant=? AND approval_id=?", (tenant, approval_id))
+        if row is None:
+            return None
+        return {"payload": json.loads(row[0]), "decision": row[1]}
 
     # ------------------------------------------------------------------ audit
 

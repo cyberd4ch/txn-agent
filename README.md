@@ -1,5 +1,10 @@
 # txn-agent
 
+[![CI](https://github.com/txn-agent/txn-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/txn-agent/txn-agent/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/txn-agent/txn-agent/branch/main/graph/badge.svg)](https://codecov.io/gh/txn-agent/txn-agent)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 **A safety-first transaction layer for purchasing agents.** Search → rank → revalidate →
 policy gate → human approval → idempotent checkout — with a deterministic gate the LLM
 can never bypass, and an audit trail of every decision.
@@ -58,7 +63,9 @@ and a policy you own:
   as the executor: the model proposes, the gate disposes, every tool call is audited.
 - **Real merchant connectors** — `HttpConnector` speaks a small documented REST
   contract ([docs/connector-contract.md](docs/connector-contract.md)) so any parts
-  distributor/aggregator can adopt it; tested against live HTTP.
+  distributor/aggregator can adopt it; tested against live HTTP. A runnable
+  merchant-side reference adapter ships in
+  [`examples/distributor_service.py`](examples/distributor_service.py).
 - **Real payments** — `StripeVault` charges exact cart totals off-session via Stripe
   PaymentIntents (test mode friendly, idempotent, voids the charge if the merchant
   order fails). Stdlib urllib — no SDK dependency.
@@ -103,6 +110,7 @@ open http://localhost:8080/ops      # approve purchases, watch the audit tail
 
 # Stripe-charged purchases (test mode)
 export STRIPE_SECRET_KEY=sk_test_...
+python examples/stripe_charge.py   # gate -> PaymentIntent -> order -> verify amount/status
 python - <<'PY'
 from txn_agent import Cart, StripeVault, TransactionalAgent
 from txn_agent.approval import AutoApprover
@@ -125,6 +133,18 @@ server on every push: search → cart → checkout → purchased → ops console
 A complete B2B walkthrough (shop policy, weekly restock cart, owner approval, audit
 file): [`examples/repair_shop.py`](examples/repair_shop.py) —
 `PYTHONPATH=. python3 examples/repair_shop.py`.
+
+Merchants: become agent-purchasable in an afternoon — run the reference distributor
+adapter (`MERCHANT_API_KEY=dist-key uvicorn examples.distributor_service:app --port 9000`)
+and see [`docs/distributor-pitch.md`](docs/distributor-pitch.md) for the one-page ask.
+
+## Docs
+
+- [docs/architecture.md](docs/architecture.md) — module map
+- [docs/security.md](docs/security.md) — threat model and deployment checklist
+- [docs/connector-contract.md](docs/connector-contract.md) — the 3-endpoint merchant API
+- [docs/distributor-pitch.md](docs/distributor-pitch.md) — why distributors adopt the contract
+- [docs/deploy.md](docs/deploy.md) — production deploy: multi-worker, `TXN_TENANTS`, TLS, Stripe
 
 ## Architecture
 
@@ -154,6 +174,8 @@ See [docs/architecture.md](docs/architecture.md) for the module map and
   charges exact totals and voids on failure
 - `storage.py` — per-tenant SQLite persistence (intents, offers, carts, runs,
   approvals, audit) so the service survives restarts; `audit.py` — JSONL decision log
+- `examples/` — repair-shop B2B demo, Stripe test-charge script, merchant-side
+  distributor adapter
 
 ## Roadmap
 

@@ -20,7 +20,10 @@ Run the demo server:
 """
 from __future__ import annotations
 
+import json
+import os
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal as D
@@ -35,7 +38,7 @@ from .approval import Approver, approval_payload
 from .audit import AuditLog
 from .connectors import default_connectors
 from .models import Cart, to_dict
-from .payments import DemoVault
+from .payments import DemoVault, StripeVault
 from .policy import GateResult
 from .storage import SQLiteStore, StoreAuditLog
 from .tools import ToolRouter
@@ -93,29 +96,50 @@ class ServiceApprover(Approver):
             self._events[approval_id] = event
         if self.store is not None:
             self.store.record_approval(self.tenant, approval_id, payload)
-        approved = event.wait(timeout=self.timeout_s) and self._results.get(approval_id, False)
+        approved = self._wait_decision(approval_id, event)
         with self._lock:
             self.pending.pop(approval_id, None)
             self._events.pop(approval_id, None)
             self._results.pop(approval_id, None)
         return approved
 
+    def _wait_decision(self, approval_id: str, event: threading.Event) -> bool:
+        """Wait in-process first; with a store, also watch the DB so an operator can
+        resolve from a different worker process."""
+        deadline = time.monotonic() + self.timeout_s
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False  # timeout -> deny (fail closed)
+            if event.wait(timeout=min(0.25, remaining)):
+                return bool(self._results.get(approval_id, False))
+            if self.store is not None:
+                row = self.store.load_approval(self.tenant, approval_id)
+                if row is not None and row["decision"] is not None:
+                    return bool(row["decision"] == "approved")
+
     def resolve(self, approval_id: str, approved: bool) -> bool:
-        """True if the id existed and was resolved."""
+        """Resolve locally if the waiter lives here; with a store, also record the
+        decision so other workers' waiters observe it."""
         with self._lock:
             event = self._events.get(approval_id)
-            if event is None:
-                return False
-            self._results[approval_id] = approved
-            event.set()
-            ok = True
+            if event is not None:
+                self._results[approval_id] = approved
+                event.set()
         if self.store is not None:
-            self.store.resolve_approval(self.tenant, approval_id, approved)
-        return ok
+            return self.store.resolve_approval(self.tenant, approval_id, approved)
+        return event is not None
 
     def snapshot(self) -> list[tuple[str, dict[str, Any]]]:
+        """All pending approvals: this worker's, plus unresolved rows in the store."""
         with self._lock:
-            return list(self.pending.items())
+            items = list(self.pending.items())
+        if self.store is not None:
+            seen = {aid for aid, _ in items}
+            for aid, payload in self.store.pending_approvals(self.tenant):
+                if aid not in seen:
+                    items.append((aid, payload))
+        return items
 
 
 @dataclass
@@ -176,6 +200,57 @@ def _outcome_dict(outcome: Outcome) -> dict[str, Any]:
             "cart": to_dict(outcome.cart) if outcome.cart else None}
 
 
+def _pid_alive(pid: int) -> bool:
+    """POSIX liveness probe (same-host workers). EPERM means alive-but-foreign."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def tenants_from_env(env: str = "TXN_TENANTS") -> TenantRegistry | None:
+    """Build the tenant registry from configuration, e.g.
+
+        TXN_TENANTS='{"acme": {"api_key": "ak_live_...", "budget_ceiling": "500",
+                     "store_path": "/var/lib/txn-agent/acme.db",
+                     "stripe_payment_methods": {"acme-user": "pm_card_visa"}}}'
+
+    Vault selection: if "stripe_payment_methods" is present, STRIPE_SECRET_KEY must be
+    set and a StripeVault is used; otherwise DemoVault. Missing/invalid config -> None
+    (callers fall back to the demo registry)."""
+    raw = os.environ.get(env)
+    if not raw:
+        return None
+    try:
+        cfg: dict[str, dict[str, Any]] = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    keys: dict[str, Tenant] = {}
+    for name, t in cfg.items():
+        if "api_key" not in t or "budget_ceiling" not in t:
+            return None
+        store = SQLiteStore(t["store_path"]) if t.get("store_path") else None
+        audit = StoreAuditLog(store, name) if store else AuditLog(None)
+        vault: DemoVault | StripeVault
+        if t.get("stripe_payment_methods"):
+            secret = os.environ.get("STRIPE_SECRET_KEY", "")
+            if not secret:
+                return None
+            vault = StripeVault(secret, t["stripe_payment_methods"])
+        else:
+            vault = DemoVault()
+        agent = TransactionalAgent(default_connectors(), vault, audit=audit)
+        keys[t["api_key"]] = Tenant(
+            name=name, agent=agent, budget_ceiling=D(str(t["budget_ceiling"])),
+            approval_timeout_s=float(t.get("approval_timeout_s", 300)), store=store)
+    return TenantRegistry(keys)
+
+
 def create_app(registry: TenantRegistry | None = None,
                approval_timeout_s: float | None = None,
                store: SQLiteStore | None = None) -> FastAPI:
@@ -201,6 +276,9 @@ def create_app(registry: TenantRegistry | None = None,
             if tenant.store is not None:
                 tenant.store.save_run(tenant.name, run_id, "final", state.result)
             state.done.set()
+
+        if tenant.store is not None:
+            tenant.store.save_run(tenant.name, run_id, "submitted", owner_pid=os.getpid())
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -260,7 +338,11 @@ def create_app(registry: TenantRegistry | None = None,
                 raise HTTPException(status_code=404, detail="unknown run_id")
             if saved["status"] == "final":
                 return {"status": "final", "outcome": saved["outcome"]}
-            return {"status": "interrupted"}  # run not owned by this process, fail closed
+            # another worker owns this run: alive pid -> still processing, dead -> interrupted
+            pid = saved.get("owner_pid")
+            if pid and _pid_alive(int(pid)):
+                return {"status": "processing"}
+            return {"status": "interrupted"}  # owning worker is gone, fail closed
         if state.result is not None:
             return {"status": "final", "outcome": state.result}
         approver = tenant.approver
@@ -367,4 +449,4 @@ refresh(); setInterval(refresh, 2000);
 </body>
 </html>"""
 
-app = create_app()  # for `uvicorn txn_agent.service:app`
+app = create_app(tenants_from_env())  # TXN_TENANTS config, else demo tenant

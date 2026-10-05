@@ -28,6 +28,14 @@ class FakeStripe(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_GET(self):
+        if self.path.startswith("/v1/payment_intents/"):
+            pi_id = self.path.rsplit("/", 1)[-1]
+            for intent in INTENTS.values():
+                if intent["id"] == pi_id:
+                    return self._json(200, intent)
+        return self._json(404, {"error": {"message": "not found"}})
+
     def do_POST(self):
         form = {k: v[0] for k, v in parse_qs(self.rfile.read(
             int(self.headers["Content-Length"])).decode()).items()}
@@ -89,6 +97,28 @@ def test_void_cancels_intent(stripe_url):
     ref = vault.authorize("shop-acct", D("5.00"), "USD", "key-void")
     vault.void(ref)
     assert ref in CANCELED
+
+
+def test_retrieve_returns_intent_by_ref(stripe_url):
+    vault = make_vault(stripe_url)
+    ref = vault.authorize("shop-acct", D("12.34"), "USD", "key-retrieve")
+    pi = vault.retrieve(ref)
+    assert pi["id"] == ref and pi["status"] == "succeeded" and pi["amount"] == 1234
+
+
+def test_example_stripe_charge_runs_green(stripe_url):
+    """examples/stripe_charge.py must verify end-to-end against the fake Stripe."""
+    import os
+    import subprocess
+    import sys
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, STRIPE_SECRET_KEY="sk_test_123", STRIPE_API_BASE=stripe_url)
+    proc = subprocess.run(
+        [sys.executable, os.path.join(root, "examples", "stripe_charge.py")],
+        capture_output=True, text=True, env=env, timeout=60)
+    assert proc.returncode == 0, f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+    assert "purchasing:" in proc.stdout and "verified:  YES" in proc.stdout
 
 
 def test_secret_key_validation():

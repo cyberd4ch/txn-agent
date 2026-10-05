@@ -132,10 +132,15 @@ def test_interrupted_run_after_restart_fails_closed(tmp_path):
             break
         time.sleep(0.05)
 
-    # restart: the pending approval died with the old process
+    # restart: another worker sees the run as processing while its owner is alive
+
     c2 = TestClient(create_app(TenantRegistry({"test-key": make_tenant(store)})))
     body = c2.get(f"/v1/purchases/{run_id}", headers=HEADERS).json()
-    assert body["status"] == "interrupted"  # never silently resumed
+    assert body["status"] == "processing"
+    # then the owning worker dies: the run is interrupted, never silently resumed
+    store.save_run("t", run_id, "submitted", owner_pid=99999999)
+    body = c2.get(f"/v1/purchases/{run_id}", headers=HEADERS).json()
+    assert body["status"] == "interrupted"
 
 
 # ---------------------------------------------------------------- ops console
