@@ -59,3 +59,18 @@
    sorted lines, and total — retries are safe, mutations produce a new key.
 5. **Extending = implementing two protocols.** A new merchant implements `Connector`; a
    new approval channel implements `Approver`. Nothing else in the core changes.
+
+## Verification status
+
+- **Core invariants** (revalidate-before-checkout, host-only budget ceilings,
+  fail-closed approvals, idempotent checkout, token-only payments, append-only
+  audit): under test in `tests/` — 62 tests, 87% coverage, CI-enforced 85% floor.
+- **LLM loop** (`llm.py`): verified end-to-end against scripted tool-use clients
+  (`tests/test_llm_loop.py`) — search → build_cart → checkout_cart with gate and
+  ceiling enforcement. Live-model smoke is a manual step:
+  `ANTHROPIC_API_KEY=sk-ant-... python -m txn_agent --llm "restock 2 door gaskets, under $150"`.
+  Without the key the CLI fails closed (`error: install the llm extra...`, exit 2).
+- **Stripe** (`StripeVault`): verified against a conforming fake Stripe server —
+  exact-cents charges, idempotent replays, void-on-merchant-failure, retrieve
+  verification. A live test-mode charge is a manual step:
+  `STRIPE_SECRET_KEY=sk_test_... python examples/stripe_charge.py`.

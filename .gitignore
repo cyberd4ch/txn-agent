@@ -8,3 +8,4 @@ examples/*_audit.jsonl
 *_audit.jsonl
 .venv/
 .coverage
+dist/
