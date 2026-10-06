@@ -1,6 +1,6 @@
 [project]
 name = "txn-agent"
-version = "0.4.3"
+version = "0.4.4"
 description = "Safety-first transaction layer for purchasing agents: deterministic policy gate, human approvals, idempotent checkout"
 readme = "README.md"
 license = { file = "LICENSE" }
