@@ -148,3 +148,21 @@ One-time setup:
 
 The tag must match the version in `pyproject.toml` — the wheel filename and PyPI
 version come from pyproject, not the tag.
+
+## 9. One-command release
+
+`scripts/release.sh` automates steps 1–2: it refuses to run unless you are on a
+clean `main` in sync with origin and the tag is unused, runs the exact CI gate
+locally (ruff, mypy strict, pytest with the 85% floor), bumps `version` in
+`pyproject.toml`, scaffolds the CHANGELOG entry and `.github/releases/<tag>.md`
+when missing, then commits, tags, and pushes main + tag:
+
+```bash
+scripts/release.sh 0.4.4 "one-line summary of user-visible changes"
+# flags: --dry-run (validate + gate only), --no-push (commit + tag locally)
+```
+
+Review the scaffolded changelog/notes it committed and amend if the highlights
+need more than one line, then push. Avoid apostrophes in the summary — they have
+broken commit-message quoting here before.
+

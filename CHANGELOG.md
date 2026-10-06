@@ -3,6 +3,25 @@
 All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: SemVer.
 
+## [0.4.4] - 2026-10-06
+
+### Added
+- **One-command release**: `scripts/release.sh X.Y.Z "summary"` validates the tree
+  (clean `main`, in sync with origin, tag unused), runs the exact CI gate locally
+  (ruff, mypy strict, pytest with the 85% floor), bumps `version` in
+  `pyproject.toml`, scaffolds the CHANGELOG entry and `.github/releases/<tag>.md`
+  when missing, then commits, tags, and pushes. `--dry-run` validates without
+  touching anything; `--no-push` stops before pushing. Documented in
+  `docs/deploy.md` section 9.
+- **Launch publish sheet** ([docs/launch/publish-sheet.md](docs/launch/publish-sheet.md)):
+  final paste-ready text for Show HN, three subreddits, and LinkedIn, with posting
+  windows, the first-comment strategy, and verified stats.
+
+### Changed
+- Docs stats refreshed to 67 tests / 86% coverage (launch drafts, `launch-post.md`,
+  `architecture.md`); publish sheet linked from the README.
+- Package version 0.4.4.
+
 ## [0.4.3] - 2026-10-05
 
 ### Added

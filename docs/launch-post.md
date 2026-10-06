@@ -72,7 +72,7 @@ passing through `evaluate_cart`.
 5. Only payment tokens cross the agent boundary — no card data in the process.
 6. Every search, gate decision, approval, and order lands in an append-only audit log.
 
-62 tests, 87% coverage, CI-enforced 85% floor, ruff + mypy strict, stdlib-only core.
+67 tests, 86% coverage, CI-enforced 85% floor, ruff + mypy strict, stdlib-only core.
 
 ### What's in the box
 

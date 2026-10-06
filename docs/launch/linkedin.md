@@ -30,7 +30,7 @@ inventory. Orders arrive pre-authorized (the buyer's side approved them), idempo
 customer, your terms, your margin. No marketplace, no rev-share. The contract and a
 runnable reference adapter are in the repo.
 
-MIT-licensed, stdlib-only core, 62 tests and 87% coverage enforced in CI.
+MIT-licensed, stdlib-only core, 67 tests and 86% coverage enforced in CI.
 Deploy guide included: multi-worker, TLS, backups.
 
 GitHub: https://github.com/cyberd4ch/txn-agent

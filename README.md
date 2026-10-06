@@ -149,6 +149,7 @@ and see [`docs/distributor-pitch.md`](docs/distributor-pitch.md) for the one-pag
 
 - [docs/architecture.md](docs/architecture.md) — module map
 - [docs/faq.md](docs/faq.md) — the objections, answered from the code
+- [docs/launch/publish-sheet.md](docs/launch/publish-sheet.md) — the launch posts, paste-ready
 - [docs/security.md](docs/security.md) — threat model and deployment checklist
 - [docs/connector-contract.md](docs/connector-contract.md) — the 3-endpoint merchant API
 - [docs/distributor-pitch.md](docs/distributor-pitch.md) — why distributors adopt the contract

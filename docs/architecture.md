@@ -64,7 +64,7 @@
 
 - **Core invariants** (revalidate-before-checkout, host-only budget ceilings,
   fail-closed approvals, idempotent checkout, token-only payments, append-only
-  audit): under test in `tests/` — 62 tests, 87% coverage, CI-enforced 85% floor.
+  audit): under test in `tests/` — 67 tests, 86% coverage, CI-enforced 85% floor.
 - **LLM loop** (`llm.py`): verified end-to-end against scripted tool-use clients
   (`tests/test_llm_loop.py`) — search → build_cart → checkout_cart with gate and
   ceiling enforcement. Live-model smoke is a manual step:

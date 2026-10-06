@@ -37,7 +37,7 @@ Approval needed ... total 160.73 above auto-buy cap
 -> declined
 ```
 
-Repo: https://github.com/cyberd4ch/txn-agent — 62 tests, 87% coverage, mypy strict.
+Repo: https://github.com/cyberd4ch/txn-agent — 67 tests, 86% coverage, mypy strict.
 Merchants are mocked (contract doc + reference adapter for real ones). Roast the
 gate design, that's what I want the feedback on.
 
