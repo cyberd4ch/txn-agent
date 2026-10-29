@@ -1,0 +1,149 @@
+{
+  "description": "Golden-set evals for txn-agent. Every case runs the real deterministic pipeline (ToolRouter -> TransactionalAgent -> gate -> checkout) against the mock catalog: no LLM, no network. Each case pins the final tool outcome and, where a gate ran, the decision recorded in the audit trace. Baseline gates CI; regressions fail the run.",
+  "cases": [
+    {
+      "id": "auto_buy_within_all_limits",
+      "desc": "Cheapest in-stock offer, under budget and cap, good returns ->AUTO_BUY -> purchased",
+      "budget_ceiling": "150",
+      "steps": [
+        { "tool": "search_offers", "args": { "vertical": "parts", "query": "dishwasher wheel kit", "max_total": 50 } },
+        { "tool": "purchase_offer", "args": { "intent_id": "$intent.0", "offer_id": "$offer.0.first_in_stock" } }
+      ],
+      "expect": { "final": 1, "status": "purchased", "decision": "auto_buy", "reason_has": [] }
+    },
+    {
+      "id": "single_offer_over_budget_rejected",
+      "desc": "Intent budget is enforced at the gate: total 51.99 > 50 -> rejected",
+      "budget_ceiling": "150",
+      "steps": [
+        { "tool": "search_offers", "args": { "vertical": "parts", "query": "door gasket", "max_total": 50 } },
+        { "tool": "purchase_offer", "args": { "intent_id": "$intent.0", "offer_id": "$offer.0.0" } }
+      ],
+      "expect": { "final": 1, "status": "rejected", "decision": "reject", "reason_has": ["exceeds budget"] }
+    },
+    {
+      "id": "cart_bypasses_intent_budget",
+      "desc": "Model omits max_total in build_cart; cart total 116.73 exceeds every line's intent budget (100/100) but is under the host ceiling. The cart checkout MUST NOT auto-purchase past the user's budget.",
+      "budget_ceiling": "150",
+      "steps": [
+        { "tool": "search_offers", "args": { "vertical": "parts", "query": "drain pump", "max_total": 100 } },
+        { "tool": "search_offers", "args": { "vertical": "parts", "query": "door gasket", "max_total": 100 } },
+        { "tool": "build_cart", "args": { "lines": [
+          { "intent_id": "$intent.0", "offer_id": "$offer.0.first_in_stock", "quantity": 1 },
+          { "intent_id": "$intent.1", "offer_id": "$offer.1.first_in_stock", "quantity": 1 }
+        ] } },
+        { "tool": "checkout_cart", "args": { "cart_id": "$cart.2" } }
+      ],
+      "expect": { "final": 3, "status": "rejected", "decision": "reject", "reason_has": ["exceeds cart budget"] }
+    },
+    {
+      "id": "cart_with_explicit_budget_rejected",
+      "desc": "Cart max_total supplied at build time is enforced by the gate (existing invariant, kept pinned)",
+      "budget_ceiling": "150",
+      "steps": [
+        { "tool": "search_offers", "args": { "vertical": "parts", "query": "drain pump", "max_total": 100 } },
+        { "tool": "search_offers", "args": { "vertical": "parts", "query": "door gasket", "max_total": 100 } },
+        { "tool": "build_cart", "args": { "max_total": 80, "lines": [
+          { "intent_id": "$intent.0", "offer_id": "$offer.0.first_in_stock", "quantity": 1 },
+          { "intent_id": "$intent.1", "offer_id": "$offer.1.first_in_stock", "quantity": 1 }
+        ] } },
+        { "tool": "checkout_cart", "args": { "cart_id": "$cart.2" } }
+      ],
+      "expect": { "final": 3, "status": "rejected", "decision": "reject", "reason_has": ["exceeds cart budget"] }
+    },
+    {
+      "id": "flight_needs_approval_no_approver_declines",
+      "desc": "always_confirm vertical with no approver wired -> fail closed",
+      "budget_ceiling": "500",
+      "steps": [
+        { "tool": "search_offers", "args": { "vertical": "flights", "query": "SFO to JFK", "max_total": 400 } },
+        { "tool": "purchase_offer", "args": { "intent_id": "$intent.0", "offer_id": "$offer.0.0" } }
+      ],
+      "expect": { "final": 1, "status": "declined", "decision": "confirm", "reason_has": [] }
+    },
+    {
+      "id": "flight_auto_confirmed_purchases",
+      "desc": "same case, AutoApprover wired: confirm decision -> approved -> purchased",
+      "budget_ceiling": "500",
+      "approver": "auto",
+      "steps": [
+        { "tool": "search_offers", "args": { "vertical": "flights", "query": "SFO to JFK", "max_total": 400 } },
+        { "tool": "purchase_offer", "args": { "intent_id": "$intent.0", "offer_id": "$offer.0.0" } }
+      ],
+      "expect": { "final": 1, "status": "purchased", "decision": "confirm", "reason_has": [] }
+    },
+    {
+      "id": "price_drift_declines",
+      "desc": "Live price moved 25% since quote (cap 2%) -> CONFIRM -> no approver -> declined",
+      "budget_ceiling": "150",
+      "price_overrides": { "parts-5": "65.00" },
+      "steps": [
+        { "tool": "search_offers", "args": { "vertical": "parts", "query": "door gasket", "max_total": 100 } },
+        { "tool": "build_cart", "args": { "lines": [ { "intent_id": "$intent.0", "offer_id": "$offer.0.0", "quantity": 1 } ] } },
+        { "tool": "checkout_cart", "args": { "cart_id": "$cart.1" } }
+      ],
+      "expect": { "final": 2, "status": "declined", "decision": "confirm", "reason_has": ["price moved"] }
+    },
+    {
+      "id": "unapproved_merchant_routes_b2b_review",
+      "desc": "approved_merchants={PartsDirect}; cheapest in-stock offer is AppliancePartsCo -> B2B_REVIEW -> auto-approved",
+      "budget_ceiling": "150",
+      "approver": "auto",
+      "policy": { "approved_merchants": { "parts": ["PartsDirect"] } },
+      "steps": [
+        { "tool": "search_offers", "args": { "vertical": "parts", "query": "dishwasher wheel kit", "max_total": 50 } },
+        { "tool": "purchase_offer", "args": { "intent_id": "$intent.0", "offer_id": "$offer.0.first_in_stock" } }
+      ],
+      "expect": { "final": 1, "status": "purchased", "decision": "b2b_review", "reason_has": ["not in approved list"] }
+    },
+    {
+      "id": "lead_time_exceeds_cap_confirms",
+      "desc": "max_lead_time_days=3; door gasket lead 6 days -> CONFIRM -> auto-approved -> purchased",
+      "budget_ceiling": "150",
+      "approver": "auto",
+      "policy": { "max_lead_time_days": { "parts": 3 } },
+      "steps": [
+        { "tool": "search_offers", "args": { "vertical": "parts", "query": "door gasket", "max_total": 100 } },
+        { "tool": "purchase_offer", "args": { "intent_id": "$intent.0", "offer_id": "$offer.0.0" } }
+      ],
+      "expect": { "final": 1, "status": "purchased", "decision": "confirm", "reason_has": ["lead time 6d exceeds 3d cap"] }
+    },
+    {
+      "id": "weak_return_policy_confirms",
+      "desc": "BudgetParts bucket drops returnable offers; explicit confirm callback allows the purchase",
+      "budget_ceiling": "150",
+      "approver": "allow_confirm",
+      "steps": [
+        { "tool": "search_offers", "args": { "vertical": "parts", "query": "dishwasher wheel kit", "max_total": 50 } },
+        { "tool": "purchase_offer", "args": { "intent_id": "$intent.0", "offer_id": "$offer.0.3" } }
+      ],
+      "expect": { "final": 1, "status": "purchased", "decision": "confirm", "reason_has": ["return policy weaker"] }
+    },
+    {
+      "id": "out_of_stock_line_rejects_whole_cart",
+      "desc": "Live stock drops on one line at revalidation; the whole order is rejected",
+      "budget_ceiling": "150",
+      "stock_overrides": { "parts-5": false },
+      "steps": [
+        { "tool": "search_offers", "args": { "vertical": "parts", "query": "drain pump", "max_total": 100 } },
+        { "tool": "search_offers", "args": { "vertical": "parts", "query": "door gasket", "max_total": 100 } },
+        { "tool": "build_cart", "args": { "max_total": 120, "lines": [
+          { "intent_id": "$intent.0", "offer_id": "$offer.0.first_in_stock", "quantity": 1 },
+          { "intent_id": "$intent.1", "offer_id": "$offer.1.first_in_stock", "quantity": 1 }
+        ] } },
+        { "tool": "checkout_cart", "args": { "cart_id": "$cart.2" } }
+      ],
+      "expect": { "final": 3, "status": "rejected", "decision": "reject", "reason_has": ["out of stock"] }
+    },
+    {
+      "id": "unknown_offer_fails_soft",
+      "desc": "Malformed/unknown tool arguments return an error dict for the model to correct - never a crash",
+      "budget_ceiling": "150",
+      "steps": [
+        { "tool": "search_offers", "args": { "vertical": "parts", "query": "door gasket", "max_total": 100 } },
+        { "tool": "purchase_offer", "args": { "intent_id": "$intent.0", "offer_id": "nope-999" } }
+      ],
+      "expect": { "final": 1, "tool_error": true, "decision": null, "reason_has": ["unknown intent_id/offer_id"] }
+    }
+  ]
+}

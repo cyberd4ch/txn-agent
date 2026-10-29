@@ -43,7 +43,10 @@ and a policy you own:
 ## Invariants (kept under test)
 
 1. Revalidate live stock/price/policy right before checkout.
-2. Budget ceilings come from the user/host, never the model (`ToolRouter` caps them).
+2. Budget ceilings come from the user/host, never the model: `ToolRouter` caps the
+   model-requested budget by the host ceiling, and a cart stamps `max_total` with the
+   **min of its lines' intent budgets**, so a cart the model builds without an explicit
+   budget can still never checkout past what the user approved.
 3. Verticals flagged `always_confirm` (flights) always need approval; no approver wired = decline.
 4. Checkout is idempotent on a deterministic key (same cart → same key → safe retries).
 5. Only payment tokens cross the agent boundary.
@@ -71,6 +74,12 @@ and a policy you own:
 - **Real payments** — `StripeVault` charges exact cart totals off-session via Stripe
   PaymentIntents (test mode friendly, idempotent, voids the charge if the merchant
   order fails). Stdlib urllib — no SDK dependency.
+- **Goldens (agent evals)** — `evals/golden_set.json` + `evals/run_evals.py` run the
+  real deterministic pipeline over 12 golden cases (auto-buy, budget rejections,
+  cart-budget bypass, price-drift, B2B review, lead times, weak returns,
+  fail-soft tool errors) and check both the final tool outcome **and the decision in
+  the audit trace** — trace-based scoring. CI gates every change against the baseline
+  (`python -m evals.run_evals --update-baseline`); a pass-rate drop fails CI.
 - **REST service** — `txn_agent.service` ships a FastAPI app with per-tenant API keys,
   budget ceilings, background purchase runs, an HTTP approval flow (over-cap
   purchases park on `POST /v1/approvals/{id}`; timeout = denied), an **ops console**

@@ -155,8 +155,20 @@ class ToolRouter:
             merchant = items[0].offer.merchant
             if any(i.offer.merchant != merchant for i in items):
                 return {"error": "cart must contain lines from a single merchant"}
+            # Tightest budget wins: the model may propose a cart budget (clamped by
+            # the host ceiling), but each line's intent already carries the user's
+            # search-time budget. Stamping min() of those means a cart built without
+            # an explicit max_total can never checkout above what the user approved
+            # (golden eval: cart_bypasses_intent_budget).
+            budgets: list[D] = []
+            if "max_total" in args:
+                budgets.append(self._budget(args["max_total"]))
+            for line in args["lines"]:
+                line_intent = self._intent(line["intent_id"])
+                if line_intent is not None:
+                    budgets.append(line_intent.max_total)
             cart = Cart(items=tuple(items),
-                        max_total=self._budget(args["max_total"]) if "max_total" in args else None)
+                        max_total=min(budgets) if budgets else None)
             self._carts[cart.cart_id] = cart
             if self.store is not None:
                 self.store.save_cart(self.tenant, cart)
@@ -176,7 +188,10 @@ class ToolRouter:
             pur_cart = self._cart(args["cart_id"])
             if pur_cart is None:
                 return {"error": "unknown cart_id; build_cart first"}
-            out = self.agent.checkout_cart(pur_cart)
+            # The build-time total is the quoted price; checkout revalidates each line
+            # against the live connector and the gate checks price drift against this
+            # quote (without it the drift check is unreachable through the tool path).
+            out = self.agent.checkout_cart(pur_cart, quoted_total=pur_cart.total)
             return {"status": out.status.value, "reasons": list(out.reasons),
                     "receipt": to_dict(out.receipt) if out.receipt else None}
 

@@ -3,6 +3,29 @@
 All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: SemVer.
 
+## [0.4.5] - 2026-10-29
+
+### Added
+- **Golden-set eval harness** (`evals/`): 12 offline cases over the real pipeline
+  (`ToolRouter -> TransactionalAgent -> gate -> mock checkout`), each pinning the
+  final tool outcome **and** the gate decision in the audit trace (trace-based
+  scoring). Standalone runner (`python -m evals.run_evals`) with a baseline file
+  that gates regression (`evals/baseline.json`), and a pytest wrapper
+  (`tests/test_eval_golden.py`) so the suite runs in the existing CI job.
+- **Eval-driven fixes** (the reason the harness exists — both were caught by the
+  first eval run, pre-fix 9/12, post-fix 12/12):
+    - `build_cart`: a cart built without an explicit `max_total` inherited NO budget
+      at checkout (the cart-path gate runs without the intent), so a model could
+      checkout past the user's search-time budget. `build_cart` now stamps the cart
+      with the min of its lines' intent budgets; the gate enforces it.
+    - `ToolRouter.checkout_cart`: the build-time cart total is now passed as
+      `quoted_total`, making the price-drift check reachable through the tool path
+      (before, drift could never fire for cart checkouts initiated by the model).
+
+### Changed
+- README invariant 2 strengthened accordingly (budgets: model proposes, host caps,
+  carts stamp the line-intent min). Package version 0.4.5.
+
 ## [0.4.4] - 2026-10-06
 
 ### Added
