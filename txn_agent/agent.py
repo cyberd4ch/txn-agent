@@ -5,7 +5,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from decimal import Decimal as D
 from enum import Enum
+from typing import Any
 
+from . import telemetry
 from .approval import Approver
 from .audit import AuditLog
 from .connectors.base import CheckoutError, Connector
@@ -98,6 +100,24 @@ class TransactionalAgent:
 
     def checkout_cart(self, cart: Cart, quoted_total: D | None = None) -> Outcome:
         """Revalidate every line -> gate the whole cart -> (approve) -> one idempotent checkout."""
+        with telemetry.span(telemetry.SPAN_CHECKOUT, {
+            telemetry.ATTR_CART_ID: cart.cart_id,
+            telemetry.ATTR_MERCHANT: cart.merchant,
+            telemetry.ATTR_VERTICAL: cart.vertical.value,
+            telemetry.ATTR_CART_TOTAL: cart.total,
+            telemetry.ATTR_CART_LINES: len(cart.items),
+        }) as active:
+            return self._checkout_cart(cart, quoted_total, active)
+
+    def _checkout_cart(self, cart: Cart, quoted_total: D | None, active: Any) -> Outcome:
+        """The checkout pipeline, with the span passed in so every exit is recorded."""
+
+        def done(outcome: Outcome) -> Outcome:
+            telemetry.set_attribute(active, telemetry.ATTR_OUTCOME, outcome.status.value)
+            if outcome.reasons:
+                telemetry.add_event(active, "txn_agent.outcome", {"reasons": list(outcome.reasons)})
+            return outcome
+
         conn = self.connectors[cart.vertical]
         live_items = tuple(CartItem(offer=conn.revalidate(i.offer), quantity=i.quantity)
                            for i in cart.items)  # never buy on stale quotes
@@ -106,33 +126,49 @@ class TransactionalAgent:
                              quoted_total=quoted_total if quoted_total is not None else live.total)
         self.audit.record(live.cart_id, "gate", cart=to_dict(live),
                           decision=gate.decision, reasons=list(gate.reasons))
+        # The decision is the fact worth querying later: which gates fire, on what,
+        # and how often. Reasons are a short tuple, not free text, so they stay
+        # safe as an attribute (and the gate is what produces them).
+        telemetry.set_attributes(active, {
+            telemetry.ATTR_GATE_DECISION: gate.decision.value,
+            telemetry.ATTR_GATE_REASONS: list(gate.reasons),
+        })
 
         if gate.decision is Decision.REJECT:
-            return Outcome(Status.REJECTED, live.cart_id, cart=live,
-                           reasons=tuple(f"{live.merchant}: {r}" for r in gate.reasons))
+            return done(Outcome(Status.REJECTED, live.cart_id, cart=live,
+                                reasons=tuple(f"{live.merchant}: {r}" for r in gate.reasons)))
         if gate.decision in (Decision.CONFIRM, Decision.B2B_REVIEW):
-            approved = self._approve(live, gate)
+            with telemetry.span(telemetry.SPAN_APPROVAL, {
+                telemetry.ATTR_CART_ID: live.cart_id,
+                telemetry.ATTR_CART_TOTAL: live.total,
+            }) as approval_span:
+                approved = self._approve(live, gate)
+                telemetry.set_attribute(approval_span, telemetry.ATTR_APPROVED, approved)
+            telemetry.set_attribute(active, telemetry.ATTR_APPROVAL_REQUIRED, True)
             self.audit.record(live.cart_id, "confirmation", approved=approved)
             if not approved:
-                return Outcome(Status.DECLINED, live.cart_id, cart=live, reasons=gate.reasons)
+                return done(Outcome(Status.DECLINED, live.cart_id, cart=live, reasons=gate.reasons))
 
         key = cart_idempotency_key(live)
+        telemetry.set_attribute(active, telemetry.ATTR_IDEMPOTENCY_KEY, key)
         first = live.items[0].offer
         lines = [(i.offer.offer_id, i.quantity) for i in live.items]
         try:
             payment_ref, charged = self._pay(live, key, live.cart_id)
         except PaymentError as e:
-            return Outcome(Status.FAILED, live.cart_id, cart=live, reasons=(f"payment: {e}",))
+            telemetry.add_event(active, "txn_agent.payment_failed", {"error": str(e)})
+            return done(Outcome(Status.FAILED, live.cart_id, cart=live, reasons=(f"payment: {e}",)))
         try:
             receipt = conn.checkout(first, payment_ref, key, lines=lines)
         except CheckoutError as e:
+            telemetry.record_exception(active, e)
             if charged:
                 self._void(payment_ref, live.cart_id)
             self.audit.record(live.cart_id, "checkout_failed", error=str(e))
-            return Outcome(Status.FAILED, live.cart_id, cart=live, reasons=(str(e),))
+            return done(Outcome(Status.FAILED, live.cart_id, cart=live, reasons=(str(e),)))
         self.audit.record(live.cart_id, "purchased", receipt=to_dict(receipt))
-        return Outcome(Status.PURCHASED, live.cart_id, cart=live, receipt=receipt,
-                       reasons=gate.reasons)
+        return done(Outcome(Status.PURCHASED, live.cart_id, cart=live, receipt=receipt,
+                            reasons=gate.reasons))
 
     def _rank_cost(self, o: Offer) -> D:
         cost = o.total * (1 + o.return_policy.restocking_fee_pct / 100)
@@ -150,36 +186,63 @@ class TransactionalAgent:
         return ranked
 
     def purchase(self, intent: Intent, quote: Offer) -> Outcome:
+        with telemetry.span(telemetry.SPAN_PURCHASE, {
+            telemetry.ATTR_MERCHANT: quote.merchant,
+            telemetry.ATTR_VERTICAL: quote.vertical.value,
+            telemetry.ATTR_CART_TOTAL: quote.total,
+        }) as active:
+            return self._purchase(intent, quote, active)
+
+    def _purchase(self, intent: Intent, quote: Offer, active: Any) -> Outcome:
+        """Single-offer path (run/CLI), with the span passed in for every exit."""
+
+        def done(outcome: Outcome) -> Outcome:
+            telemetry.set_attribute(active, telemetry.ATTR_OUTCOME, outcome.status.value)
+            return outcome
+
         conn = self.connectors[intent.vertical]
         live = conn.revalidate(quote)  # never buy on a stale quote
         gate = evaluate(live, intent, self.policy, quote.total)
         self.audit.record(intent.intent_id, "gate", offer=to_dict(live),
                           decision=gate.decision, reasons=gate.reasons)
+        telemetry.set_attributes(active, {
+            telemetry.ATTR_GATE_DECISION: gate.decision.value,
+            telemetry.ATTR_GATE_REASONS: list(gate.reasons),
+        })
 
         if gate.decision is Decision.REJECT:
-            return Outcome(Status.REJECTED, intent.intent_id, live,
-                           reasons=tuple(f"{live.merchant}: {r}" for r in gate.reasons))
+            return done(Outcome(Status.REJECTED, intent.intent_id, live,
+                                reasons=tuple(f"{live.merchant}: {r}" for r in gate.reasons)))
         if gate.decision in (Decision.CONFIRM, Decision.B2B_REVIEW):
-            approved = self._approve(single_line_cart(live, intent.intent_id), gate)
+            with telemetry.span(telemetry.SPAN_APPROVAL, {
+                telemetry.ATTR_CART_TOTAL: live.total,
+                telemetry.ATTR_VERTICAL: live.vertical.value,
+            }) as approval_span:
+                approved = self._approve(single_line_cart(live, intent.intent_id), gate)
+                telemetry.set_attribute(approval_span, telemetry.ATTR_APPROVED, approved)
+            telemetry.set_attribute(active, telemetry.ATTR_APPROVAL_REQUIRED, True)
             self.audit.record(intent.intent_id, "confirmation", approved=approved)
             if not approved:
-                return Outcome(Status.DECLINED, intent.intent_id, live, reasons=gate.reasons)
+                return done(Outcome(Status.DECLINED, intent.intent_id, live, reasons=gate.reasons))
 
         key = idempotency_key(intent, live)
+        telemetry.set_attribute(active, telemetry.ATTR_IDEMPOTENCY_KEY, key)
         try:
             payment_ref, charged = self._pay(single_line_cart(live, intent.intent_id), key, intent.intent_id)
         except PaymentError as e:
-            return Outcome(Status.FAILED, intent.intent_id, live, reasons=(f"payment: {e}",))
+            telemetry.add_event(active, "txn_agent.payment_failed", {"error": str(e)})
+            return done(Outcome(Status.FAILED, intent.intent_id, live, reasons=(f"payment: {e}",)))
         try:
             receipt = conn.checkout(live, payment_ref, key)
         except CheckoutError as e:
+            telemetry.record_exception(active, e)
             if charged:
                 self._void(payment_ref, intent.intent_id)
             self.audit.record(intent.intent_id, "checkout_failed", error=str(e))
-            return Outcome(Status.FAILED, intent.intent_id, live, reasons=(str(e),))
+            return done(Outcome(Status.FAILED, intent.intent_id, live, reasons=(str(e),)))
         self.audit.record(intent.intent_id, "purchased", receipt=to_dict(receipt))
-        return Outcome(Status.PURCHASED, intent.intent_id, live, receipt,
-                       reasons=gate.reasons)
+        return done(Outcome(Status.PURCHASED, intent.intent_id, live, receipt,
+                            reasons=gate.reasons))
 
     def run(self, intent: Intent) -> Outcome:
         rejections: list[str] = []

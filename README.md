@@ -154,6 +154,28 @@ Merchants: become agent-purchasable in an afternoon — run the reference distri
 adapter (`MERCHANT_API_KEY=dist-key uvicorn examples.distributor_service:app --port 9000`)
 and see [`docs/distributor-pitch.md`](docs/distributor-pitch.md) for the one-page ask.
 
+## Tracing (optional)
+
+The core is still stdlib-only: OpenTelemetry is never imported unless you ask for it.
+
+```bash
+pip install 'txn-agent[otel]'   # opentelemetry-api; bring your own exporter/SDK
+```
+
+Every agent run becomes a trace — `invoke_agent txn-agent` → `chat <model>` and
+`execute_tool <name>` spans — plus `txn_agent.checkout_cart` with the gate decision,
+reasons, cart total, outcome and the idempotency key as attributes. Tool arguments and
+prompt text are deliberately **not** recorded. No provider configured means no-op, so
+library users pay nothing for it.
+
+```python
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+
+trace.set_tracer_provider(TracerProvider())   # your exporter of choice
+txn_agent.telemetry.reset()                   # re-detect the configured provider
+```
+
 ## Docs
 
 - [docs/architecture.md](docs/architecture.md) — module map

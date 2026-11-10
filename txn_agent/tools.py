@@ -5,6 +5,7 @@ from __future__ import annotations
 from decimal import Decimal as D
 from typing import TYPE_CHECKING, Any
 
+from . import telemetry
 from .agent import TransactionalAgent
 from .models import Cart, CartItem, Intent, Offer, Vertical, to_dict
 
@@ -121,12 +122,24 @@ class ToolRouter:
             raise ValueError(f"unparseable budget {requested!r}") from e
 
     def call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
-        try:
-            return self._dispatch(name, args)
-        except (KeyError, TypeError, ValueError) as e:
-            # Local/weak models send malformed arguments; fail soft so the loop can
-            # report the problem back to the model instead of crashing the run.
-            return {"error": f"invalid arguments for {name}: {e}"}
+        # Every tool execution is a span: the arguments are deliberately NOT recorded
+        # (they can carry user data), only the tool name, the outcome and an error
+        # class when the call failed.
+        with telemetry.span(telemetry.tool_span_name(name), {
+            telemetry.ATTR_OPERATION: "execute_tool",
+            telemetry.ATTR_TOOL_NAME: name,
+            telemetry.ATTR_VERTICAL: args.get("vertical"),
+        }) as active:
+            try:
+                out = self._dispatch(name, args)
+            except (KeyError, TypeError, ValueError) as e:
+                # Local/weak models send malformed arguments; fail soft so the loop can
+                # report the problem back to the model instead of crashing the run.
+                telemetry.set_attribute(active, telemetry.ATTR_TOOL_ERROR, "invalid_arguments")
+                return {"error": f"invalid arguments for {name}: {e}"}
+            if isinstance(out, dict) and "error" in out:
+                telemetry.set_attribute(active, telemetry.ATTR_TOOL_ERROR, str(out["error"])[:120])
+            return out
 
     def _dispatch(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         if name == "search_offers":

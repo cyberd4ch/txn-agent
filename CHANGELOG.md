@@ -3,6 +3,18 @@
 All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: SemVer.
 
+## [Unreleased]
+
+### Added
+- **Optional OpenTelemetry tracing** (`txn_agent/telemetry.py`, extra `txn-agent[otel]`):
+  one `invoke_agent txn-agent` span per model run, with `chat <model>` children carrying
+  `gen_ai.usage.*` token counts, `execute_tool <name>` spans per tool call, and a
+  `txn_agent.checkout_cart` span recording the gate decision, its reasons, the cart
+  total, the outcome and the idempotency key. Approval verdicts get their own child
+  span. Tool arguments and prompts are never recorded. The core stays stdlib-only:
+  no import of `opentelemetry` at module load, and an unconfigured provider means
+  every helper is a no-op.
+
 ## [0.4.5] - 2026-10-29
 
 ### Added

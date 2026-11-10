@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal as D
 from typing import Any
 
+from . import telemetry
 from .agent import TransactionalAgent
 from .tools import TOOL_SCHEMAS, ToolRouter
 
@@ -56,26 +57,50 @@ def run_llm_request(agent: TransactionalAgent, request: str, *, budget_ceiling: 
     messages: list[dict[str, Any]] = [{"role": "user", "content": request}]
     tool_calls: list[dict[str, Any]] = []
     reply, stop = "", "end_turn"
+    turns = 0
 
-    for _ in range(max_turns):
-        resp = client.messages.create(model=model, max_tokens=1024, system=SYSTEM_PROMPT,
-                                      messages=messages, tools=TOOL_SCHEMAS)
-        reply = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
-        if resp.stop_reason != "tool_use":
-            stop = resp.stop_reason
-            break
-        messages.append({"role": resp.role, "content": resp.content})
-        results: list[dict[str, Any]] = []
-        for block in resp.content:
-            if getattr(block, "type", "") != "tool_use":
-                continue
-            out = router.call(block.name, dict(block.input))
-            tool_calls.append({"tool": block.name, "args": dict(block.input), "result": out})
-            agent.audit.record("llm", "tool_call", tool=block.name, result=out)
-            results.append({"type": "tool_result", "tool_use_id": block.id,
-                            "content": json.dumps(out, default=str)})
-        messages.append({"role": "user", "content": results})
-    else:
-        stop = "max_turns"  # model kept requesting tools past the turn budget
+    # One parent span per agent run: model calls and tool executions nest under it,
+    # which is what makes a looping agent readable in a trace instead of flat.
+    with telemetry.span(telemetry.SPAN_AGENT_RUN, {
+        telemetry.ATTR_OPERATION: "invoke_agent",
+        telemetry.ATTR_AGENT_NAME: "txn-agent",
+        telemetry.ATTR_MODEL: model,
+    }) as active:
+        for turn in range(max_turns):
+            turns = turn + 1
+            with telemetry.span(telemetry.chat_span_name(model), {
+                telemetry.ATTR_OPERATION: "chat",
+                telemetry.ATTR_MODEL: model,
+            }) as chat_span:
+                resp = client.messages.create(model=model, max_tokens=1024, system=SYSTEM_PROMPT,
+                                              messages=messages, tools=TOOL_SCHEMAS)
+                usage = getattr(resp, "usage", None)
+                if usage is not None:
+                    telemetry.set_attributes(chat_span, {
+                        telemetry.ATTR_INPUT_TOKENS: getattr(usage, "input_tokens", None),
+                        telemetry.ATTR_OUTPUT_TOKENS: getattr(usage, "output_tokens", None),
+                    })
+            reply = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
+            if resp.stop_reason != "tool_use":
+                stop = resp.stop_reason
+                break
+            messages.append({"role": resp.role, "content": resp.content})
+            results: list[dict[str, Any]] = []
+            for block in resp.content:
+                if getattr(block, "type", "") != "tool_use":
+                    continue
+                out = router.call(block.name, dict(block.input))
+                tool_calls.append({"tool": block.name, "args": dict(block.input), "result": out})
+                agent.audit.record("llm", "tool_call", tool=block.name, result=out)
+                results.append({"type": "tool_result", "tool_use_id": block.id,
+                                "content": json.dumps(out, default=str)})
+            messages.append({"role": "user", "content": results})
+        else:
+            stop = "max_turns"  # model kept requesting tools past the turn budget
+
+        telemetry.set_attributes(active, {
+            telemetry.ATTR_TURNS: turns,
+            telemetry.ATTR_STOP_REASON: stop,
+        })
 
     return LLMResult(reply=reply, stopped_reason=stop, tool_calls=tool_calls)
